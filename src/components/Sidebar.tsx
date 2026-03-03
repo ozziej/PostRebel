@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Collection, Environment, ApiRequest } from '../types';
+import { Collection, Environment, ApiRequest, Workspace } from '../types';
 
 interface SidebarProps {
+  activeWorkspace: Workspace | null;
   collections: Collection[];
   environments: Environment[];
   activeEnvironment: Environment | null;
@@ -12,11 +13,11 @@ interface SidebarProps {
   onDeleteCollection: (collectionId: string) => Promise<any>;
   onDeleteRequest: (collectionId: string, requestId: string) => Promise<any>;
   onDeleteEnvironment: (environmentId: string) => Promise<any>;
-  onOpenCertManager: () => void;
   onEditEnvironmentVariables: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
+  activeWorkspace,
   collections,
   environments,
   activeEnvironment,
@@ -27,7 +28,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteCollection,
   onDeleteRequest,
   onDeleteEnvironment,
-  onOpenCertManager,
   onEditEnvironmentVariables
 }) => {
   const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
@@ -37,6 +37,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [newEnvironmentName, setNewEnvironmentName] = useState('');
   const [editingCollection, setEditingCollection] = useState<string | null>(null);
   const [editingEnvironment, setEditingEnvironment] = useState<string | null>(null);
+  const [editingRequest, setEditingRequest] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
   const toggleCollection = (collectionId: string) => {
@@ -127,6 +128,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const cancelEdit = () => {
     setEditingCollection(null);
     setEditingEnvironment(null);
+    setEditingRequest(null);
+    setEditName('');
+  };
+
+  const startEditingRequest = (request: ApiRequest) => {
+    setEditingRequest(request.id);
+    setEditName(request.name);
+  };
+
+  const saveRequestName = async (collection: Collection, request: ApiRequest) => {
+    if (!editName.trim()) return;
+
+    const updatedCollection = {
+      ...collection,
+      requests: collection.requests.map(r =>
+        r.id === request.id ? { ...r, name: editName } : r
+      )
+    };
+
+    await onSaveCollection(updatedCollection);
+    setEditingRequest(null);
     setEditName('');
   };
 
@@ -171,9 +193,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className="sidebar">
-      <div className="sidebar-header">
-        <h2>Postal Service</h2>
-      </div>
+      {/* Workspace Info Display */}
+      {activeWorkspace && (
+        <div style={{
+          padding: '1rem',
+          borderBottom: '1px solid #404040',
+          backgroundColor: '#1a2d2d'
+        }}>
+          <div style={{
+            fontSize: '0.75rem',
+            color: '#888',
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px',
+            marginBottom: '0.25rem'
+          }}>
+            Active Workspace
+          </div>
+          <div style={{
+            fontSize: '1rem',
+            color: '#ffffff',
+            fontWeight: 'bold',
+            marginBottom: '0.25rem'
+          }}>
+            {activeWorkspace.name}
+          </div>
+          {activeWorkspace.description && (
+            <div style={{
+              fontSize: '0.8rem',
+              color: '#aaa',
+              fontStyle: 'italic'
+            }}>
+              {activeWorkspace.description}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="sidebar-section">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -294,17 +348,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
           </div>
         ))}
-      </div>
-
-      <div className="sidebar-section">
-        <h3>Security</h3>
-        <button
-          className="button"
-          onClick={onOpenCertManager}
-          style={{ width: '100%', fontSize: '0.85rem' }}
-        >
-          🔒 Manage Certificates
-        </button>
       </div>
 
       <div className="sidebar-section" style={{ flex: 1, overflowY: 'auto' }}>
@@ -449,28 +492,80 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <div
                     key={request.id}
                     className="request-item"
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem' }}
                   >
-                    <div
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, cursor: 'pointer' }}
-                      onClick={() => onSelectRequest(request)}
-                    >
-                      <span className={`http-method ${request.method}`}>
-                        {request.method}
-                      </span>
-                      <span>{request.name}</span>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteRequest(collection, request.id, request.name);
-                      }}
-                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                      className="button-secondary button"
-                      title="Delete request"
-                    >
-                      🗑️
-                    </button>
+                    {editingRequest === request.id ? (
+                      <>
+                        <span className={`http-method ${request.method}`} style={{ marginRight: '0.5rem' }}>
+                          {request.method}
+                        </span>
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="form-input"
+                          style={{ fontSize: '0.9rem', flex: 1, marginRight: '0.5rem' }}
+                          onKeyPress={(e) => e.key === 'Enter' && saveRequestName(collection, request)}
+                          onBlur={() => saveRequestName(collection, request)}
+                          onClick={(e) => e.stopPropagation()}
+                          autoFocus
+                        />
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            saveRequestName(collection, request);
+                          }}
+                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                          className="button"
+                        >
+                          ✓
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            cancelEdit();
+                          }}
+                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }}
+                          className="button-secondary button"
+                        >
+                          ✗
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, cursor: 'pointer' }}
+                          onClick={() => onSelectRequest(request)}
+                        >
+                          <span className={`http-method ${request.method}`}>
+                            {request.method}
+                          </span>
+                          <span>{request.name}</span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditingRequest(request);
+                          }}
+                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginRight: '0.25rem' }}
+                          className="button-secondary button"
+                          title="Rename request"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteRequest(collection, request.id, request.name);
+                          }}
+                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                          className="button-secondary button"
+                          title="Delete request"
+                        >
+                          🗑️
+                        </button>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Collection, Environment, ApiRequest, ApiResponse, Certificate } from './types';
+import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace } from './types';
+import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
+import { ResizableSidebar } from './components/ResizableSidebar';
 import { RequestPanel } from './components/RequestPanel';
 import { ResponsePanel } from './components/ResponsePanel';
 import { CertificateManager } from './components/CertificateManager';
 import { EnvironmentEditor } from './components/EnvironmentEditor';
+import { WorkspaceManager } from './components/WorkspaceManager';
+import { SettingsModal } from './components/SettingsModal';
 import { HttpService } from './utils/httpService';
 import { ScriptRunner } from './utils/scriptRunner';
 import './App.css';
 
 function App() {
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [certificates, setCertificates] = useState<Certificate[]>([]);
@@ -20,15 +26,39 @@ function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [showCertManager, setShowCertManager] = useState(false);
   const [showEnvEditor, setShowEnvEditor] = useState(false);
+  const [showWorkspaceManager, setShowWorkspaceManager] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
-    loadData();
+    loadWorkspaces();
   }, []);
+
+  useEffect(() => {
+    if (activeWorkspace) {
+      loadData();
+    }
+  }, [activeWorkspace]);
+
+  const loadWorkspaces = async () => {
+    try {
+      const result = await window.electronAPI.loadWorkspaces();
+      if (result.success) {
+        setWorkspaces(result.workspaces);
+        // Auto-select first workspace if available
+        if (result.workspaces.length > 0 && !activeWorkspace) {
+          setActiveWorkspace(result.workspaces[0]);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading workspaces:', error);
+    }
+  };
 
   const loadData = async () => {
     try {
-      const collectionsResult = await window.electronAPI.loadCollections(undefined);
-      const environmentsResult = await window.electronAPI.loadEnvironments(undefined);
+      const workspaceId = activeWorkspace?.id;
+      const collectionsResult = await window.electronAPI.loadCollections(workspaceId);
+      const environmentsResult = await window.electronAPI.loadEnvironments(workspaceId);
 
       if (collectionsResult.success) {
         setCollections(collectionsResult.collections);
@@ -54,7 +84,8 @@ function App() {
   };
 
   const saveCollection = async (collection: Collection) => {
-    const result = await window.electronAPI.saveCollection(undefined, collection);
+    const workspaceId = activeWorkspace?.id;
+    const result = await window.electronAPI.saveCollection(workspaceId, collection);
     if (result.success) {
       setCollections(prev => {
         const index = prev.findIndex(c => c.id === collection.id);
@@ -71,7 +102,8 @@ function App() {
   };
 
   const saveEnvironment = async (environment: Environment) => {
-    const result = await window.electronAPI.saveEnvironment(undefined, environment);
+    const workspaceId = activeWorkspace?.id;
+    const result = await window.electronAPI.saveEnvironment(workspaceId, environment);
     if (result.success) {
       setEnvironments(prev => {
         const index = prev.findIndex(e => e.id === environment.id);
@@ -83,6 +115,12 @@ function App() {
           return [...prev, environment];
         }
       });
+
+      // Also update activeEnvironment if it's the one being saved
+      if (activeEnvironment?.id === environment.id) {
+        setActiveEnvironment(environment);
+        console.log('[App] Updated active environment:', environment.name);
+      }
     }
     return result;
   };
@@ -149,6 +187,57 @@ function App() {
       await saveCollection(updatedCollection);
       console.log('[App] Auto-saved request:', updatedRequest.name);
     }
+  };
+
+  const handleCreateWorkspace = async (name: string, description?: string) => {
+    const result = await window.electronAPI.createWorkspace(name, description);
+    if (result.success && result.workspace) {
+      const newWorkspace = result.workspace;
+      setWorkspaces(prev => [...prev, newWorkspace]);
+      setActiveWorkspace(newWorkspace);
+      console.log('[App] Created and switched to workspace:', newWorkspace.name);
+    } else {
+      throw new Error(result.error || 'Failed to create workspace');
+    }
+  };
+
+  const handleUpdateWorkspace = async (workspaceId: string, name: string, description?: string) => {
+    const result = await window.electronAPI.updateWorkspace(workspaceId, name, description);
+    if (result.success && result.workspace) {
+      const updatedWorkspace = result.workspace;
+      setWorkspaces(prev => prev.map(w => w.id === workspaceId ? updatedWorkspace : w));
+
+      // If updating the active workspace, update it
+      if (activeWorkspace?.id === workspaceId) {
+        setActiveWorkspace(updatedWorkspace);
+      }
+
+      console.log('[App] Updated workspace:', updatedWorkspace.name);
+    } else {
+      throw new Error(result.error || 'Failed to update workspace');
+    }
+  };
+
+  const handleDeleteWorkspace = async (workspaceId: string) => {
+    const result = await window.electronAPI.deleteWorkspace(workspaceId);
+    if (result.success) {
+      setWorkspaces(prev => prev.filter(w => w.id !== workspaceId));
+      console.log('[App] Deleted workspace:', workspaceId);
+    } else {
+      throw new Error(result.error || 'Failed to delete workspace');
+    }
+  };
+
+  const handleSelectWorkspace = async (workspace: Workspace) => {
+    setActiveWorkspace(workspace);
+    await window.electronAPI.setActiveWorkspace(workspace.id);
+    console.log('[App] Switched to workspace:', workspace.name);
+    // Clear current data
+    setCollections([]);
+    setEnvironments([]);
+    setActiveEnvironment(null);
+    setActiveRequest(null);
+    setCurrentResponse(null);
   };
 
   const executeRequest = async (request: ApiRequest) => {
@@ -219,22 +308,34 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar
-        collections={collections}
-        environments={environments}
-        activeEnvironment={activeEnvironment}
-        onSelectEnvironment={setActiveEnvironment}
-        onSelectRequest={setActiveRequest}
-        onSaveCollection={saveCollection}
-        onSaveEnvironment={saveEnvironment}
-        onDeleteCollection={deleteCollection}
-        onDeleteRequest={deleteRequest}
-        onDeleteEnvironment={deleteEnvironment}
+      <TopBar
+        workspaces={workspaces}
+        activeWorkspace={activeWorkspace}
+        onSelectWorkspace={handleSelectWorkspace}
+        onOpenWorkspaceManager={() => setShowWorkspaceManager(true)}
         onOpenCertManager={() => setShowCertManager(true)}
-        onEditEnvironmentVariables={() => setShowEnvEditor(true)}
+        onOpenSettings={() => setShowSettings(true)}
       />
 
-      <div className="main-content">
+      <div className="app-body">
+        <ResizableSidebar defaultWidth={300} minWidth={250} maxWidth={600}>
+          <Sidebar
+            activeWorkspace={activeWorkspace}
+            collections={collections}
+            environments={environments}
+            activeEnvironment={activeEnvironment}
+            onSelectEnvironment={setActiveEnvironment}
+            onSelectRequest={setActiveRequest}
+            onSaveCollection={saveCollection}
+            onSaveEnvironment={saveEnvironment}
+            onDeleteCollection={deleteCollection}
+            onDeleteRequest={deleteRequest}
+            onDeleteEnvironment={deleteEnvironment}
+            onEditEnvironmentVariables={() => setShowEnvEditor(true)}
+          />
+        </ResizableSidebar>
+
+        <div className="main-content">
         <RequestPanel
           request={activeRequest}
           environment={activeEnvironment}
@@ -248,6 +349,7 @@ function App() {
           logs={logs}
           isLoading={isLoading}
         />
+        </div>
       </div>
 
       <CertificateManager
@@ -261,6 +363,22 @@ function App() {
         environment={activeEnvironment}
         onClose={() => setShowEnvEditor(false)}
         onSave={saveEnvironment}
+      />
+
+      <WorkspaceManager
+        isOpen={showWorkspaceManager}
+        workspaces={workspaces}
+        activeWorkspace={activeWorkspace}
+        onClose={() => setShowWorkspaceManager(false)}
+        onCreateWorkspace={handleCreateWorkspace}
+        onUpdateWorkspace={handleUpdateWorkspace}
+        onDeleteWorkspace={handleDeleteWorkspace}
+        onSelectWorkspace={handleSelectWorkspace}
+      />
+
+      <SettingsModal
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
       />
     </div>
   );

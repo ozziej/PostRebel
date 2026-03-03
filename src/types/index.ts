@@ -89,6 +89,8 @@ declare global {
       createWorkspace: (name: string, description?: string) => Promise<{ success: boolean; workspace?: Workspace; error?: string }>;
       loadWorkspaces: () => Promise<{ success: boolean; workspaces: Workspace[] }>;
       setActiveWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>;
+      updateWorkspace: (workspaceId: string, name: string, description?: string) => Promise<{ success: boolean; workspace?: Workspace; error?: string }>;
+      deleteWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>;
 
       // Collection management (workspace-aware)
       saveCollection: (workspaceId: string | undefined, data: Collection) => Promise<{ success: boolean; path?: string; error?: string }>;
@@ -110,6 +112,11 @@ declare global {
       // Git operations
       gitInit: () => Promise<{ success: boolean; error?: string }>;
       gitStatus: () => Promise<{ success: boolean; status?: any; error?: string }>;
+
+      // Settings
+      getSettings: () => Promise<{ success: boolean; settings?: any; error?: string }>;
+      updateSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
+      chooseWorkspaceDirectory: () => Promise<{ success: boolean; directory?: string; error?: string }>;
     };
   }
 }

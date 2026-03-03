@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Environment } from '../types';
+import { Environment, EnvironmentVariable, KeyValuePair } from '../types';
 import { KeyValueEditor } from './KeyValueEditor';
 
 interface EnvironmentEditorProps {
@@ -15,21 +15,67 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
   onClose,
   onSave
 }) => {
-  const [localEnv, setLocalEnv] = useState<Environment | null>(null);
+  const [variablesData, setVariablesData] = useState<KeyValuePair[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [currentEnv, setCurrentEnv] = useState<Environment | null>(null);
 
   useEffect(() => {
     if (isOpen && environment) {
-      setLocalEnv({ ...environment });
+      setCurrentEnv(environment);
+
+      // Convert environment to variablesData
+      // Check if it has variablesArray (new format) or variables (old format)
+      if (environment.variablesArray && environment.variablesArray.length > 0) {
+        // New format with secrets support
+        setVariablesData(environment.variablesArray.map(v => ({
+          key: v.key,
+          value: v.value,
+          enabled: true,
+          isSecret: v.isSecret
+        })));
+      } else if (environment.variables && Object.keys(environment.variables).length > 0) {
+        // Old format - convert to new format
+        setVariablesData(Object.entries(environment.variables).map(([key, value]) => ({
+          key,
+          value,
+          enabled: true,
+          isSecret: false
+        })));
+      } else {
+        // Empty - start with one empty row
+        setVariablesData([{ key: '', value: '', enabled: true, isSecret: false }]);
+      }
     }
   }, [isOpen, environment]);
 
   const handleSave = async () => {
-    if (!localEnv) return;
+    if (!currentEnv) return;
 
     setIsSaving(true);
     try {
-      await onSave(localEnv);
+      // Convert variablesData back to Environment format
+      const variablesArray: EnvironmentVariable[] = variablesData
+        .filter(item => item.key.trim() !== '') // Only save non-empty keys
+        .map(item => ({
+          key: item.key,
+          value: item.value,
+          isSecret: item.isSecret || false
+        }));
+
+      // Also maintain legacy variables format for backward compatibility
+      const variables: Record<string, string> = {};
+      variablesArray.forEach(v => {
+        variables[v.key] = v.value;
+      });
+
+      const updatedEnv: Environment = {
+        ...currentEnv,
+        variables,
+        variablesArray
+      };
+
+      console.log('[EnvironmentEditor] Saving environment:', updatedEnv);
+      await onSave(updatedEnv);
       onClose();
     } catch (error) {
       console.error('Failed to save environment:', error);
@@ -39,31 +85,12 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
     }
   };
 
-  const handleVariablesChange = (data: Array<{ key: string; value: string; enabled: boolean }>) => {
-    if (!localEnv) return;
-
-    const variables: Record<string, string> = {};
-    data.forEach(item => {
-      if (item.enabled && item.key) {
-        variables[item.key] = item.value;
-      }
-    });
-
-    setLocalEnv({ ...localEnv, variables });
+  const handleVariablesChange = (data: KeyValuePair[]) => {
+    console.log('[EnvironmentEditor] Variables changed:', data);
+    setVariablesData(data);
   };
 
-  if (!isOpen || !localEnv) return null;
-
-  // Convert environment variables to KeyValueEditor format
-  const variablesData = Object.entries(localEnv.variables || {}).map(([key, value]) => ({
-    key,
-    value,
-    enabled: true,
-    isSecret: false
-  }));
-
-  // Ensure we always have at least one empty row if no variables
-  const displayData = variablesData.length > 0 ? variablesData : [{ key: '', value: '', enabled: true, isSecret: false }];
+  if (!isOpen || !currentEnv) return null;
 
   return (
     <div style={{
@@ -92,7 +119,7 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
           <div>
             <h2>Environment Variables</h2>
             <div style={{ fontSize: '0.9rem', color: '#888', marginTop: '0.25rem' }}>
-              {localEnv.name}
+              {currentEnv.name}
             </div>
           </div>
           <button onClick={onClose} className="button-secondary button">✗</button>
@@ -112,7 +139,7 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
 
         <div style={{ marginBottom: '1.5rem' }}>
           <KeyValueEditor
-            data={displayData}
+            data={variablesData}
             onChange={handleVariablesChange}
             placeholder={{ key: 'Variable name (e.g., api_key)', value: 'Variable value' }}
             allowSecrets={true}
@@ -161,11 +188,15 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
                   border: '1px solid #404040'
                 }}
                 onClick={() => {
-                  if (!localEnv.variables[varName]) {
-                    setLocalEnv({
-                      ...localEnv,
-                      variables: { ...localEnv.variables, [varName]: '' }
-                    });
+                  // Check if variable already exists
+                  const exists = variablesData.some(v => v.key === varName);
+                  if (!exists) {
+                    setVariablesData([...variablesData, {
+                      key: varName,
+                      value: '',
+                      enabled: true,
+                      isSecret: false
+                    }]);
                   }
                 }}
                 title={`Click to add ${varName}`}

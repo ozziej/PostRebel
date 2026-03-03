@@ -5,6 +5,8 @@ export interface ElectronAPI {
   createWorkspace: (name: string, description?: string) => Promise<any>;
   loadWorkspaces: () => Promise<any>;
   setActiveWorkspace: (workspaceId: string) => Promise<any>;
+  updateWorkspace: (workspaceId: string, name: string, description?: string) => Promise<any>;
+  deleteWorkspace: (workspaceId: string) => Promise<any>;
 
   // Collection management
   saveCollection: (workspaceId: string | undefined, data: any) => Promise<any>;
@@ -26,6 +28,11 @@ export interface ElectronAPI {
   // Git operations
   gitInit: () => Promise<any>;
   gitStatus: () => Promise<any>;
+
+  // Settings
+  getSettings: () => Promise<any>;
+  updateSettings: (settings: any) => Promise<any>;
+  chooseWorkspaceDirectory: () => Promise<any>;
 }
 
 const api: ElectronAPI = {
@@ -33,6 +40,8 @@ const api: ElectronAPI = {
   createWorkspace: (name, description) => ipcRenderer.invoke('create-workspace', name, description),
   loadWorkspaces: () => ipcRenderer.invoke('load-workspaces'),
   setActiveWorkspace: (workspaceId) => ipcRenderer.invoke('set-active-workspace', workspaceId),
+  updateWorkspace: (workspaceId, name, description) => ipcRenderer.invoke('update-workspace', workspaceId, name, description),
+  deleteWorkspace: (workspaceId) => ipcRenderer.invoke('delete-workspace', workspaceId),
 
   // Collection management
   saveCollection: (workspaceId, data) => ipcRenderer.invoke('save-collection', workspaceId, data),
@@ -54,6 +63,11 @@ const api: ElectronAPI = {
   // Git operations
   gitInit: () => ipcRenderer.invoke('git-init'),
   gitStatus: () => ipcRenderer.invoke('git-status'),
+
+  // Settings
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  updateSettings: (settings) => ipcRenderer.invoke('update-settings', settings),
+  chooseWorkspaceDirectory: () => ipcRenderer.invoke('choose-workspace-directory'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

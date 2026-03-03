@@ -4,8 +4,39 @@ import * as fs from 'fs/promises';
 import { simpleGit } from 'simple-git';
 import axios, { AxiosRequestConfig } from 'axios';
 import * as https from 'https';
+import * as os from 'os';
 
 let mainWindow: BrowserWindow;
+
+// Settings storage
+let cachedSettings: any = null;
+
+async function getSettings(): Promise<any> {
+  if (cachedSettings) return cachedSettings;
+
+  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  try {
+    const content = await fs.readFile(settingsPath, 'utf-8');
+    cachedSettings = JSON.parse(content);
+  } catch {
+    // Default settings
+    cachedSettings = {
+      workspacesDirectory: path.join(os.homedir(), 'PostalServiceWorkspaces')
+    };
+  }
+  return cachedSettings;
+}
+
+async function saveSettings(settings: any): Promise<void> {
+  cachedSettings = settings;
+  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+}
+
+async function getWorkspacesBaseDir(): Promise<string> {
+  const settings = await getSettings();
+  return settings.workspacesDirectory;
+}
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
@@ -41,8 +72,29 @@ app.on('activate', () => {
 // Workspace management
 ipcMain.handle('create-workspace', async (event, name, description) => {
   try {
-    const workspaceId = Date.now().toString();
-    const workspacePath = getWorkspacePath(workspaceId);
+    const workspacesDir = await getWorkspacesBaseDir();
+    await fs.mkdir(workspacesDir, { recursive: true });
+
+    // Use sanitized name as the workspace ID (folder name)
+    let workspaceId = sanitizeFilename(name);
+
+    // Check if workspace already exists, append number if needed
+    let counter = 1;
+    let finalWorkspaceId = workspaceId;
+    while (true) {
+      try {
+        const testPath = path.join(workspacesDir, finalWorkspaceId);
+        await fs.access(testPath);
+        // If we get here, folder exists, try next number
+        finalWorkspaceId = `${workspaceId}-${counter}`;
+        counter++;
+      } catch {
+        // Folder doesn't exist, we can use this name
+        break;
+      }
+    }
+
+    const workspacePath = await getWorkspacePath(finalWorkspaceId);
 
     // Create workspace structure
     await fs.mkdir(path.join(workspacePath, 'environments'), { recursive: true });
@@ -50,7 +102,7 @@ ipcMain.handle('create-workspace', async (event, name, description) => {
 
     // Create workspace metadata file
     const workspace = {
-      id: workspaceId,
+      id: finalWorkspaceId,
       name,
       description: description || '',
       path: workspacePath,
@@ -75,7 +127,45 @@ node_modules/
     `.trim();
     await fs.writeFile(gitignorePath, gitignoreContent);
 
+    console.log('[Electron] Created workspace:', finalWorkspaceId);
     return { success: true, workspace };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+// Settings management
+ipcMain.handle('get-settings', async () => {
+  try {
+    const settings = await getSettings();
+    return { success: true, settings };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('update-settings', async (event, newSettings) => {
+  try {
+    await saveSettings(newSettings);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('choose-workspace-directory', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Select Workspaces Folder',
+      buttonLabel: 'Select Folder'
+    });
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      return { success: true, directory: result.filePaths[0] };
+    }
+
+    return { success: false, error: 'No directory selected' };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -83,7 +173,7 @@ node_modules/
 
 ipcMain.handle('load-workspaces', async () => {
   try {
-    const workspacesDir = path.join(process.cwd(), 'workspaces');
+    const workspacesDir = await getWorkspacesBaseDir();
 
     // Ensure workspaces directory exists
     try {
@@ -101,7 +191,14 @@ ipcMain.handle('load-workspaces', async () => {
         const metadataPath = path.join(workspacesDir, entry.name, 'workspace.json');
         try {
           const content = await fs.readFile(metadataPath, 'utf-8');
-          workspaces.push(JSON.parse(content));
+          const workspace = JSON.parse(content);
+
+          // IMPORTANT: Use the folder name as the true ID, not what's in the file
+          // This fixes manually renamed folders
+          workspace.id = entry.name;
+          workspace.path = path.join(workspacesDir, entry.name);
+
+          workspaces.push(workspace);
         } catch {
           // Skip directories without workspace.json
         }
@@ -123,13 +220,99 @@ ipcMain.handle('set-active-workspace', async (event, workspaceId) => {
   }
 });
 
+ipcMain.handle('update-workspace', async (event, workspaceId, name, description) => {
+  try {
+    const workspacesDir = await getWorkspacesBaseDir();
+    const oldWorkspacePath = path.join(workspacesDir, workspaceId);
+
+    // Use sanitized name as the new workspace ID
+    let newWorkspaceId = sanitizeFilename(name);
+
+    // If name hasn't changed (just description update), don't rename folder
+    if (newWorkspaceId !== workspaceId) {
+      // Check if new name already exists, append number if needed
+      let counter = 1;
+      let finalWorkspaceId = newWorkspaceId;
+      while (true) {
+        try {
+          const testPath = path.join(workspacesDir, finalWorkspaceId);
+          if (testPath !== oldWorkspacePath) {
+            await fs.access(testPath);
+            // If we get here, folder exists, try next number
+            finalWorkspaceId = `${newWorkspaceId}-${counter}`;
+            counter++;
+          } else {
+            break;
+          }
+        } catch {
+          // Folder doesn't exist, we can use this name
+          break;
+        }
+      }
+
+      const newWorkspacePath = path.join(workspacesDir, finalWorkspaceId);
+
+      // Rename the workspace folder
+      await fs.rename(oldWorkspacePath, newWorkspacePath);
+      workspaceId = finalWorkspaceId;
+
+      console.log('[Electron] Renamed workspace folder:', oldWorkspacePath, '->', newWorkspacePath);
+    }
+
+    // Update workspace metadata
+    const workspace = {
+      id: workspaceId,
+      name,
+      description: description || '',
+      path: path.join(workspacesDir, workspaceId),
+      createdAt: new Date().toISOString(), // We don't have the old createdAt, use current
+      updatedAt: new Date().toISOString()
+    };
+
+    const metadataPath = path.join(workspacesDir, workspaceId, 'workspace.json');
+    await fs.writeFile(metadataPath, JSON.stringify(workspace, null, 2));
+
+    console.log('[Electron] Updated workspace:', workspaceId);
+    return { success: true, workspace };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('delete-workspace', async (event, workspaceId) => {
+  try {
+    const workspacesDir = await getWorkspacesBaseDir();
+    const workspacePath = path.join(workspacesDir, workspaceId);
+
+    // Delete the entire workspace folder
+    await fs.rm(workspacePath, { recursive: true, force: true });
+
+    console.log('[Electron] Deleted workspace:', workspaceId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 // Helper functions for workspace management
-function getWorkspacePath(workspaceId?: string): string {
+async function getWorkspacePath(workspaceId?: string): Promise<string> {
   if (!workspaceId) {
     // Backward compatibility: use old structure
     return process.cwd();
   }
-  return path.join(process.cwd(), 'workspaces', workspaceId);
+  const workspacesDir = await getWorkspacesBaseDir();
+  return path.join(workspacesDir, workspaceId);
+}
+
+// Sanitize filename to be filesystem-safe
+function sanitizeFilename(name: string): string {
+  return name
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-') // Replace invalid chars with dash
+    .replace(/\s+/g, '-') // Replace spaces with dash
+    .replace(/\.+/g, '.') // Replace multiple dots with single dot
+    .replace(/^\.+/, '') // Remove leading dots
+    .replace(/\.+$/, '') // Remove trailing dots
+    .substring(0, 255); // Limit length
 }
 
 function splitSecrets(data: any): { public: any; secrets: any } {
@@ -177,25 +360,54 @@ function splitSecrets(data: any): { public: any; secrets: any } {
 // IPC Handlers for file operations
 ipcMain.handle('save-collection', async (event, workspaceId, data) => {
   try {
-    const basePath = getWorkspacePath(workspaceId);
+    const basePath = await getWorkspacePath(workspaceId);
     const collectionsDir = workspaceId
       ? path.join(basePath, 'collections')
       : path.join(basePath, 'collections');
     await fs.mkdir(collectionsDir, { recursive: true });
 
+    // Sanitize the filename
+    const sanitizedName = sanitizeFilename(data.name);
+    const newFilename = `${sanitizedName}.json`;
+    const newSecretsFilename = `${sanitizedName}.secrets.json`;
+
+    // Check if this collection was previously saved with a different name
+    if (data._previousFilename && data._previousFilename !== newFilename) {
+      // Delete old files
+      try {
+        const oldPath = path.join(collectionsDir, data._previousFilename);
+        await fs.unlink(oldPath);
+        console.log('[Electron] Deleted old collection file:', data._previousFilename);
+      } catch (err) {
+        // File might not exist, that's okay
+      }
+
+      try {
+        const oldSecretsPath = path.join(collectionsDir, data._previousFilename.replace('.json', '.secrets.json'));
+        await fs.unlink(oldSecretsPath);
+        console.log('[Electron] Deleted old secrets file');
+      } catch (err) {
+        // Secrets file might not exist, that's okay
+      }
+    }
+
     // Split secrets
     const { public: publicData, secrets } = splitSecrets(data);
 
+    // Store the current filename in the data for future renames
+    publicData._previousFilename = newFilename;
+
     // Save public data
-    const filePath = path.join(collectionsDir, `${data.name}.json`);
+    const filePath = path.join(collectionsDir, newFilename);
     await fs.writeFile(filePath, JSON.stringify(publicData, null, 2));
 
     // Save secrets if any
     if (Object.keys(secrets.requests || {}).length > 0) {
-      const secretsPath = path.join(collectionsDir, `${data.name}.secrets.json`);
+      const secretsPath = path.join(collectionsDir, newSecretsFilename);
       await fs.writeFile(secretsPath, JSON.stringify(secrets, null, 2));
     }
 
+    console.log('[Electron] Saved collection:', newFilename);
     return { success: true, path: filePath };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -204,7 +416,7 @@ ipcMain.handle('save-collection', async (event, workspaceId, data) => {
 
 ipcMain.handle('load-collections', async (event, workspaceId) => {
   try {
-    const basePath = getWorkspacePath(workspaceId);
+    const basePath = await getWorkspacePath(workspaceId);
     const collectionsDir = workspaceId
       ? path.join(basePath, 'collections')
       : path.join(basePath, 'collections');
@@ -251,25 +463,54 @@ ipcMain.handle('load-collections', async (event, workspaceId) => {
 
 ipcMain.handle('save-environment', async (event, workspaceId, data) => {
   try {
-    const basePath = getWorkspacePath(workspaceId);
+    const basePath = await getWorkspacePath(workspaceId);
     const envDir = workspaceId
       ? path.join(basePath, 'environments')
       : path.join(basePath, 'environments');
     await fs.mkdir(envDir, { recursive: true });
 
+    // Sanitize the filename
+    const sanitizedName = sanitizeFilename(data.name);
+    const newFilename = `${sanitizedName}.json`;
+    const newSecretsFilename = `${sanitizedName}.secrets.json`;
+
+    // Check if this environment was previously saved with a different name
+    if (data._previousFilename && data._previousFilename !== newFilename) {
+      // Delete old files
+      try {
+        const oldPath = path.join(envDir, data._previousFilename);
+        await fs.unlink(oldPath);
+        console.log('[Electron] Deleted old environment file:', data._previousFilename);
+      } catch (err) {
+        // File might not exist, that's okay
+      }
+
+      try {
+        const oldSecretsPath = path.join(envDir, data._previousFilename.replace('.json', '.secrets.json'));
+        await fs.unlink(oldSecretsPath);
+        console.log('[Electron] Deleted old environment secrets file');
+      } catch (err) {
+        // Secrets file might not exist, that's okay
+      }
+    }
+
     // Split secrets from environment variables
     const { public: publicData, secrets } = splitSecrets(data);
 
+    // Store the current filename in the data for future renames
+    publicData._previousFilename = newFilename;
+
     // Save public data
-    const filePath = path.join(envDir, `${data.name}.json`);
+    const filePath = path.join(envDir, newFilename);
     await fs.writeFile(filePath, JSON.stringify(publicData, null, 2));
 
     // Save secrets if any
     if (secrets.variables && Object.keys(secrets.variables).length > 0) {
-      const secretsPath = path.join(envDir, `${data.name}.secrets.json`);
+      const secretsPath = path.join(envDir, newSecretsFilename);
       await fs.writeFile(secretsPath, JSON.stringify(secrets, null, 2));
     }
 
+    console.log('[Electron] Saved environment:', newFilename);
     return { success: true, path: filePath };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -278,7 +519,7 @@ ipcMain.handle('save-environment', async (event, workspaceId, data) => {
 
 ipcMain.handle('load-environments', async (event, workspaceId) => {
   try {
-    const basePath = getWorkspacePath(workspaceId);
+    const basePath = await getWorkspacePath(workspaceId);
     const envDir = workspaceId
       ? path.join(basePath, 'environments')
       : path.join(basePath, 'environments');
