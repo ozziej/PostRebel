@@ -1,18 +1,23 @@
-# Postal Service
+# PostRebel
 
 A local API testing tool with git support - your Postman alternative.
 
 ## Features
 
-✅ **Current MVP Features:**
+✅ **Current Features:**
 - Make API calls (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)
 - Authentication support (Bearer, Basic, JWT)
 - Variable templating with `{{variable}}` syntax
 - Pre-request and test scripts with Postman-compatible `pm` object
 - Local file storage with git support
-- Environment management
+- Environment management with variable editor
 - Token extraction from responses
 - **Certificate management** - Import custom CA certificates for internal APIs
+- **Postman V2 collection and environment import**
+- **cURL command import**
+- **Form data** - x-www-form-urlencoded and multipart form-data body types
+- **Workspace management** - Organize projects into separate workspaces, each with their own git repo
+- **Secrets management** - Mark variables and form parameters as secret; secrets are automatically split into `.secrets.json` files and gitignored
 
 ## Quick Start
 
@@ -34,12 +39,17 @@ This will:
 ## Project Structure
 
 ```
-PostalService/
-├── collections/          # API collections (committed to git)
-│   └── sample-api.json   # Sample collection
-├── environments/         # Environment configs (committed to git)
-│   └── development.json  # Sample environment
-├── certificates/         # Custom certificates (NOT committed to git)
+PostRebel/
+├── workspaces/               # Workspace projects
+│   └── my-project-123456/
+│       ├── workspace.json          # Project metadata
+│       ├── .git/                   # Per-workspace git repo
+│       ├── .gitignore              # Auto-generated (excludes secrets)
+│       ├── collections/            # API collections (committed)
+│       ├── environments/           # Environment configs (committed)
+│       │   ├── dev.json            # Public variables
+│       │   └── dev.secrets.json    # Secret variables (gitignored)
+│       └── certificates/           # Custom certificates (NOT committed)
 ├── src/                  # React app source
 ├── electron/            # Electron main process
 └── dist/               # Built files
@@ -138,9 +148,11 @@ aWRnaXRzIFB0eSBMdGQwHhcNMjMwNjE5MTQwNDM5WhcNMjQwNjE4MTQwNDM5WjBF
 
 ## Git Integration
 
-- Collections and environments are automatically saved as JSON files
-- Add to git for team sharing: `git add collections/ environments/`
-- Secrets should go in `environments/*.local.json` (auto-gitignored)
+- Each workspace has its own git repository, initialized automatically on creation
+- Collections and environments are saved as JSON files within the workspace
+- Variables and form parameters marked as secret are automatically split into `.secrets.json` files
+- `.secrets.json` files are gitignored so credentials are never committed
+- See [Workspaces & Secrets Guide](docs/workspaces-and-secrets.md) for details
 
 ## Development
 
@@ -161,12 +173,10 @@ npm run dist         # Create distributable packages
 ## Roadmap
 
 🚧 **Planned Features:**
-- Postman V2 collection import
-- Form data and file uploads
 - Request history
-- Environment variable editor
-- Collection runner
-- Export/import
+- Collection runner (batch/sequential request execution)
+- File upload support in form-data bodies
+- Collection export
 - Plugin system
 
 ## Contributing

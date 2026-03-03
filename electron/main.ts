@@ -21,7 +21,7 @@ async function getSettings(): Promise<any> {
   } catch {
     // Default settings
     cachedSettings = {
-      workspacesDirectory: path.join(os.homedir(), 'PostalServiceWorkspaces')
+      workspacesDirectory: path.join(os.homedir(), 'PostRebelWorkspaces')
     };
   }
   return cachedSettings;

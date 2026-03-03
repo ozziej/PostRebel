@@ -2,7 +2,7 @@
 
 ## Overview
 
-Postal Service now includes a complete workspace system with automatic secrets management. This allows you to organize projects, collaborate via git, and keep sensitive credentials secure.
+PostRebel now includes a complete workspace system with automatic secrets management. This allows you to organize projects, collaborate via git, and keep sensitive credentials secure.
 
 ## What are Workspaces?
 

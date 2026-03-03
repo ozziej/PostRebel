@@ -44,7 +44,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         color: '#0d7377',
         marginRight: '1rem'
       }}>
-        Postal Service
+        PostRebel
       </div>
 
       {/* Workspace Selector */}
