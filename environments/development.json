@@ -1,0 +1,10 @@
+{
+  "id": "development",
+  "name": "Development",
+  "variables": {
+    "api_base": "https://httpbin.org",
+    "username": "testuser",
+    "password": "testpass",
+    "auth_token": ""
+  }
+}

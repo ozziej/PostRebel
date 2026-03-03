@@ -1,0 +1,52 @@
+{
+  "id": "sample-collection",
+  "name": "Sample API Collection",
+  "requests": [
+    {
+      "id": "auth-request",
+      "name": "Get Auth Token",
+      "method": "POST",
+      "url": "https://httpbin.org/post",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "type": "raw",
+        "data": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}"
+      },
+      "testScript": "// Extract token from response\nconst response = pm.response.json();\n\nif (response.json && response.json.username) {\n    // Simulate token extraction\n    const mockToken = 'bearer_' + Date.now();\n    pm.environment.set('auth_token', mockToken);\n    console.log('Auth token set:', mockToken);\n    \n    pm.test('Authentication successful', () => {\n        pm.expect(pm.response.status).to.equal(200);\n    });\n}"
+    },
+    {
+      "id": "protected-request",
+      "name": "Get User Profile",
+      "method": "GET",
+      "url": "https://httpbin.org/get?user_id=123",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "auth": {
+        "type": "bearer",
+        "bearer": "{{auth_token}}"
+      },
+      "testScript": "pm.test('Profile retrieved', () => {\n    pm.expect(pm.response.status).to.equal(200);\n});\n\nconsole.log('Profile request completed with token:', pm.environment.get('auth_token'));"
+    },
+    {
+      "id": "1772525408308",
+      "name": "New Request",
+      "method": "GET",
+      "url": "https://api.example.com",
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    },
+    {
+      "id": "1772526681932",
+      "name": "New Request",
+      "method": "GET",
+      "url": "https://api.example.com",
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    }
+  ]
+}

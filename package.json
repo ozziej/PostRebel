@@ -1,0 +1,38 @@
+{
+  "name": "postal-service",
+  "version": "1.0.0",
+  "description": "Local API testing tool with git support",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:electron\" \"npm run dev:react\"",
+    "dev:react": "webpack serve --mode development",
+    "dev:electron": "npm run build:electron && wait-on http://localhost:3000 && NODE_ENV=development npx electron .",
+    "build": "npm run build:react && npm run build:electron",
+    "build:react": "webpack --mode production",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "dist": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "concurrently": "^8.2.2",
+    "css-loader": "^6.10.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^25.0.0",
+    "html-webpack-plugin": "^5.6.0",
+    "style-loader": "^3.3.4",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.0",
+    "wait-on": "^7.2.0",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "simple-git": "^3.21.0"
+  }
+}

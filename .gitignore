@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env.local
+environments/*.local.json
+certificates/
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets - never commit these!
+*.secrets.json
+workspaces/**/secrets/
