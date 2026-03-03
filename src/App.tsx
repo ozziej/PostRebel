@@ -10,6 +10,7 @@ import { EnvironmentEditor } from './components/EnvironmentEditor';
 import { EnvironmentManager } from './components/EnvironmentManager';
 import { WorkspaceManager } from './components/WorkspaceManager';
 import { SettingsModal } from './components/SettingsModal';
+import { ImportModal, ImportTab } from './components/ImportModal';
 import { HttpService } from './utils/httpService';
 import { ScriptRunner } from './utils/scriptRunner';
 import './App.css';
@@ -30,6 +31,8 @@ function App() {
   const [showEnvManager, setShowEnvManager] = useState(false);
   const [showWorkspaceManager, setShowWorkspaceManager] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importModalTab, setImportModalTab] = useState<ImportTab>('collection');
 
   useEffect(() => {
     loadWorkspaces();
@@ -287,6 +290,37 @@ function App() {
     setShowEnvManager(false);
   };
 
+  const openImportModal = (tab: ImportTab = 'collection') => {
+    setImportModalTab(tab);
+    setShowImportModal(true);
+  };
+
+  const handleImportCollection = async (collection: Collection, collectionVariables?: Environment) => {
+    await saveCollection(collection);
+    // Auto-expand the imported collection in sidebar
+    if (collectionVariables) {
+      await saveEnvironment(collectionVariables);
+    }
+    console.log('[App] Imported collection:', collection.name, `(${collection.requests.length} requests)`);
+  };
+
+  const handleImportEnvironment = async (environment: Environment) => {
+    await saveEnvironment(environment);
+    setActiveEnvironment(environment);
+    console.log('[App] Imported environment:', environment.name);
+  };
+
+  const handleImportCurl = async (request: ApiRequest) => {
+    const newCollection: Collection = {
+      id: Date.now().toString(),
+      name: request.name || 'Imported from cURL',
+      requests: [request],
+    };
+    await saveCollection(newCollection);
+    setActiveRequest(request);
+    console.log('[App] Imported curl request:', request.name);
+  };
+
   const executeRequest = async (request: ApiRequest) => {
     if (!activeEnvironment) {
       alert('Please select an environment first');
@@ -377,6 +411,7 @@ function App() {
             onSaveCollection={saveCollection}
             onDeleteCollection={deleteCollection}
             onDeleteRequest={deleteRequest}
+            onOpenImport={() => openImportModal('collection')}
           />
         </ResizableSidebar>
 
@@ -420,6 +455,7 @@ function App() {
         onDeleteEnvironment={handleDeleteEnvironment}
         onSelectEnvironment={setActiveEnvironment}
         onEditVariables={handleEditEnvironmentVariables}
+        onOpenImport={() => openImportModal('environment')}
       />
 
       <WorkspaceManager
@@ -436,6 +472,15 @@ function App() {
       <SettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
+      />
+
+      <ImportModal
+        isOpen={showImportModal}
+        initialTab={importModalTab}
+        onClose={() => setShowImportModal(false)}
+        onImportCollection={handleImportCollection}
+        onImportEnvironment={handleImportEnvironment}
+        onImportCurl={handleImportCurl}
       />
     </div>
   );

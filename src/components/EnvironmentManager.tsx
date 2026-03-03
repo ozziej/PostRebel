@@ -11,6 +11,7 @@ interface EnvironmentManagerProps {
   onDeleteEnvironment: (environmentId: string) => Promise<void>;
   onSelectEnvironment: (environment: Environment) => void;
   onEditVariables: (environment: Environment) => void;
+  onOpenImport?: () => void;
 }
 
 export const EnvironmentManager: React.FC<EnvironmentManagerProps> = ({
@@ -22,7 +23,8 @@ export const EnvironmentManager: React.FC<EnvironmentManagerProps> = ({
   onUpdateEnvironment,
   onDeleteEnvironment,
   onSelectEnvironment,
-  onEditVariables
+  onEditVariables,
+  onOpenImport
 }) => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingEnvironment, setEditingEnvironment] = useState<string | null>(null);
@@ -157,13 +159,27 @@ export const EnvironmentManager: React.FC<EnvironmentManagerProps> = ({
 
         {/* Create New Environment Button */}
         {!showCreateForm && (
-          <button
-            onClick={() => setShowCreateForm(true)}
-            className="button"
-            style={{ width: '100%', marginBottom: '1.5rem' }}
-          >
-            + New Environment
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+            <button
+              onClick={() => setShowCreateForm(true)}
+              className="button"
+              style={{ flex: 1 }}
+            >
+              + New Environment
+            </button>
+            {onOpenImport && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenImport();
+                }}
+                className="button-secondary button"
+                title="Import Postman environment"
+              >
+                Import
+              </button>
+            )}
+          </div>
         )}
 
         {/* Create Form */}

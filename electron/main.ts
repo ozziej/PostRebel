@@ -660,6 +660,27 @@ ipcMain.handle('load-certificate-file', async () => {
   }
 });
 
+ipcMain.handle('select-json-file', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'JSON Files', extensions: ['json'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, error: 'No file selected' };
+    }
+
+    const content = await fs.readFile(result.filePaths[0], 'utf-8');
+    return { success: true, content };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 // HTTP Request handler - runs in Node.js, no CORS restrictions!
 ipcMain.handle('execute-http-request', async (event, requestConfig) => {
   const startTime = Date.now();

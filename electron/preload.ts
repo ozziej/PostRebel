@@ -33,6 +33,9 @@ export interface ElectronAPI {
   getSettings: () => Promise<any>;
   updateSettings: (settings: any) => Promise<any>;
   chooseWorkspaceDirectory: () => Promise<any>;
+
+  // Import
+  selectJsonFile: () => Promise<{ success: boolean; content?: string; error?: string }>;
 }
 
 const api: ElectronAPI = {
@@ -68,6 +71,9 @@ const api: ElectronAPI = {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   updateSettings: (settings) => ipcRenderer.invoke('update-settings', settings),
   chooseWorkspaceDirectory: () => ipcRenderer.invoke('choose-workspace-directory'),
+
+  // Import
+  selectJsonFile: () => ipcRenderer.invoke('select-json-file'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

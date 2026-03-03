@@ -8,6 +8,7 @@ interface SidebarProps {
   onSaveCollection: (collection: Collection) => Promise<any>;
   onDeleteCollection: (collectionId: string) => Promise<any>;
   onDeleteRequest: (collectionId: string, requestId: string) => Promise<any>;
+  onOpenImport?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -16,7 +17,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectRequest,
   onSaveCollection,
   onDeleteCollection,
-  onDeleteRequest
+  onDeleteRequest,
+  onOpenImport
 }) => {
   const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
   const [showNewCollection, setShowNewCollection] = useState(false);
@@ -178,13 +180,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="sidebar-section" style={{ flex: 1, overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>Collections</h3>
-          <button
-            className="button"
-            onClick={() => setShowNewCollection(true)}
-            style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
-          >
-            + New
-          </button>
+          <div style={{ display: 'flex', gap: '0.25rem' }}>
+            <button
+              className="button"
+              onClick={() => setShowNewCollection(true)}
+              style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+            >
+              + New
+            </button>
+            {onOpenImport && (
+              <button
+                className="button-secondary button"
+                onClick={onOpenImport}
+                style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                title="Import collection or curl"
+              >
+                Import
+              </button>
+            )}
+          </div>
         </div>
 
         {showNewCollection && (
