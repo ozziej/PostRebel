@@ -7,6 +7,7 @@ import { RequestPanel } from './components/RequestPanel';
 import { ResponsePanel } from './components/ResponsePanel';
 import { CertificateManager } from './components/CertificateManager';
 import { EnvironmentEditor } from './components/EnvironmentEditor';
+import { EnvironmentManager } from './components/EnvironmentManager';
 import { WorkspaceManager } from './components/WorkspaceManager';
 import { SettingsModal } from './components/SettingsModal';
 import { HttpService } from './utils/httpService';
@@ -26,6 +27,7 @@ function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [showCertManager, setShowCertManager] = useState(false);
   const [showEnvEditor, setShowEnvEditor] = useState(false);
+  const [showEnvManager, setShowEnvManager] = useState(false);
   const [showWorkspaceManager, setShowWorkspaceManager] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -240,6 +242,51 @@ function App() {
     setCurrentResponse(null);
   };
 
+  const handleCreateEnvironment = async (name: string) => {
+    const newEnvironment: Environment = {
+      id: Date.now().toString(),
+      name: name,
+      variables: {},
+      variablesArray: []
+    };
+
+    const result = await saveEnvironment(newEnvironment);
+    if (result.success) {
+      setActiveEnvironment(newEnvironment);
+      console.log('[App] Created and switched to environment:', newEnvironment.name);
+    } else {
+      throw new Error(result.error || 'Failed to create environment');
+    }
+  };
+
+  const handleUpdateEnvironment = async (environmentId: string, name: string) => {
+    const environment = environments.find(e => e.id === environmentId);
+    if (!environment) {
+      throw new Error('Environment not found');
+    }
+
+    const updatedEnvironment: Environment = {
+      ...environment,
+      name: name
+    };
+
+    const result = await saveEnvironment(updatedEnvironment);
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to update environment');
+    }
+    console.log('[App] Updated environment:', updatedEnvironment.name);
+  };
+
+  const handleDeleteEnvironment = async (environmentId: string) => {
+    await deleteEnvironment(environmentId);
+  };
+
+  const handleEditEnvironmentVariables = (environment: Environment) => {
+    setActiveEnvironment(environment);
+    setShowEnvEditor(true);
+    setShowEnvManager(false);
+  };
+
   const executeRequest = async (request: ApiRequest) => {
     if (!activeEnvironment) {
       alert('Please select an environment first');
@@ -311,8 +358,12 @@ function App() {
       <TopBar
         workspaces={workspaces}
         activeWorkspace={activeWorkspace}
+        environments={environments}
+        activeEnvironment={activeEnvironment}
         onSelectWorkspace={handleSelectWorkspace}
+        onSelectEnvironment={setActiveEnvironment}
         onOpenWorkspaceManager={() => setShowWorkspaceManager(true)}
+        onOpenEnvironmentManager={() => setShowEnvManager(true)}
         onOpenCertManager={() => setShowCertManager(true)}
         onOpenSettings={() => setShowSettings(true)}
       />
@@ -322,16 +373,10 @@ function App() {
           <Sidebar
             activeWorkspace={activeWorkspace}
             collections={collections}
-            environments={environments}
-            activeEnvironment={activeEnvironment}
-            onSelectEnvironment={setActiveEnvironment}
             onSelectRequest={setActiveRequest}
             onSaveCollection={saveCollection}
-            onSaveEnvironment={saveEnvironment}
             onDeleteCollection={deleteCollection}
             onDeleteRequest={deleteRequest}
-            onDeleteEnvironment={deleteEnvironment}
-            onEditEnvironmentVariables={() => setShowEnvEditor(true)}
           />
         </ResizableSidebar>
 
@@ -363,6 +408,18 @@ function App() {
         environment={activeEnvironment}
         onClose={() => setShowEnvEditor(false)}
         onSave={saveEnvironment}
+      />
+
+      <EnvironmentManager
+        isOpen={showEnvManager}
+        environments={environments}
+        activeEnvironment={activeEnvironment}
+        onClose={() => setShowEnvManager(false)}
+        onCreateEnvironment={handleCreateEnvironment}
+        onUpdateEnvironment={handleUpdateEnvironment}
+        onDeleteEnvironment={handleDeleteEnvironment}
+        onSelectEnvironment={setActiveEnvironment}
+        onEditVariables={handleEditEnvironmentVariables}
       />
 
       <WorkspaceManager

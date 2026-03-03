@@ -1,11 +1,15 @@
 import React from 'react';
-import { Workspace } from '../types';
+import { Workspace, Environment } from '../types';
 
 interface TopBarProps {
   workspaces: Workspace[];
   activeWorkspace: Workspace | null;
+  environments: Environment[];
+  activeEnvironment: Environment | null;
   onSelectWorkspace: (workspace: Workspace) => void;
+  onSelectEnvironment: (environment: Environment) => void;
   onOpenWorkspaceManager: () => void;
+  onOpenEnvironmentManager: () => void;
   onOpenCertManager: () => void;
   onOpenSettings: () => void;
 }
@@ -13,8 +17,12 @@ interface TopBarProps {
 export const TopBar: React.FC<TopBarProps> = ({
   workspaces,
   activeWorkspace,
+  environments,
+  activeEnvironment,
   onSelectWorkspace,
+  onSelectEnvironment,
   onOpenWorkspaceManager,
+  onOpenEnvironmentManager,
   onOpenCertManager,
   onOpenSettings
 }) => {
@@ -44,7 +52,6 @@ export const TopBar: React.FC<TopBarProps> = ({
         display: 'flex',
         alignItems: 'center',
         gap: '0.5rem',
-        flex: 1,
         maxWidth: '400px'
       }}>
         <label style={{
@@ -67,7 +74,8 @@ export const TopBar: React.FC<TopBarProps> = ({
             border: '1px solid #555',
             color: '#ffffff',
             borderRadius: '4px',
-            fontSize: '0.9rem'
+            fontSize: '0.9rem',
+            minWidth: '150px'
           }}
         >
           <option value="">No Workspace</option>
@@ -86,6 +94,58 @@ export const TopBar: React.FC<TopBarProps> = ({
             whiteSpace: 'nowrap'
           }}
           title="Manage workspaces"
+        >
+          ⚙️ Manage
+        </button>
+      </div>
+
+      {/* Environment Selector */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+        maxWidth: '400px'
+      }}>
+        <label style={{
+          fontSize: '0.85rem',
+          color: '#cccccc',
+          whiteSpace: 'nowrap'
+        }}>
+          Environment:
+        </label>
+        <select
+          value={activeEnvironment?.id || ''}
+          onChange={(e) => {
+            const environment = environments.find(env => env.id === e.target.value);
+            if (environment) onSelectEnvironment(environment);
+          }}
+          style={{
+            flex: 1,
+            padding: '0.5rem',
+            backgroundColor: '#404040',
+            border: '1px solid #555',
+            color: '#ffffff',
+            borderRadius: '4px',
+            fontSize: '0.9rem',
+            minWidth: '150px'
+          }}
+        >
+          <option value="">No Environment</option>
+          {environments.map(env => (
+            <option key={env.id} value={env.id}>
+              {env.name}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={onOpenEnvironmentManager}
+          className="button"
+          style={{
+            padding: '0.5rem 0.75rem',
+            fontSize: '0.9rem',
+            whiteSpace: 'nowrap'
+          }}
+          title="Manage environments"
         >
           ⚙️ Manage
         </button>
