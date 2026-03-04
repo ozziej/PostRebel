@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace } from './types';
+import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace, RequestHistoryEntry } from './types';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { ResizableSidebar } from './components/ResizableSidebar';
@@ -34,6 +34,7 @@ function App() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importModalTab, setImportModalTab] = useState<ImportTab>('collection');
   const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [requestHistory, setRequestHistory] = useState<RequestHistoryEntry[]>([]);
   const savedPrefsRef = useRef<{ activeWorkspaceId?: string; activeEnvironmentId?: string }>({});
 
   useEffect(() => {
@@ -108,6 +109,16 @@ function App() {
         const certificatesResult = await window.electronAPI.loadCertificates();
         if (certificatesResult.success) {
           setCertificates(certificatesResult.certificates);
+        }
+      }
+
+      // Load history
+      if (activeWorkspace) {
+        const historyResult = await window.electronAPI.loadHistory(activeWorkspace.id);
+        if (historyResult.success && historyResult.entries) {
+          setRequestHistory(historyResult.entries);
+        } else {
+          setRequestHistory([]);
         }
       }
     } catch (error) {
@@ -287,6 +298,7 @@ function App() {
     setActiveEnvironment(null);
     setActiveRequest(null);
     setCurrentResponse(null);
+    setRequestHistory([]);
   };
 
   const handleCreateEnvironment = async (name: string) => {
@@ -403,6 +415,26 @@ function App() {
       const response = await HttpService.executeRequest(request, activeEnvironment, certificates);
       setCurrentResponse(response);
 
+      // Log history entry
+      if (activeWorkspace) {
+        const resolvedUrl = request.url.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
+          return activeEnvironment.variables[varName] || match;
+        });
+        const entry: RequestHistoryEntry = {
+          id: Date.now().toString(),
+          requestId: request.id,
+          timestamp: new Date().toISOString(),
+          method: request.method,
+          url: resolvedUrl,
+          status: response.status,
+          statusText: response.statusText,
+          time: response.time,
+          size: response.size,
+        };
+        window.electronAPI.saveHistoryEntry(activeWorkspace.id, entry);
+        setRequestHistory(prev => [entry, ...prev]);
+      }
+
       // Execute test script
       if (request.testScript) {
         const testScriptResult = ScriptRunner.executeTestScript(
@@ -436,6 +468,26 @@ function App() {
         time: 0,
         size: 0
       });
+
+      // Log error to history
+      if (activeWorkspace && activeEnvironment) {
+        const resolvedUrl = request.url.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
+          return activeEnvironment.variables[varName] || match;
+        });
+        const entry: RequestHistoryEntry = {
+          id: Date.now().toString(),
+          requestId: request.id,
+          timestamp: new Date().toISOString(),
+          method: request.method,
+          url: resolvedUrl,
+          status: 0,
+          statusText: 'Fatal Error',
+          time: 0,
+          size: 0,
+        };
+        window.electronAPI.saveHistoryEntry(activeWorkspace.id, entry);
+        setRequestHistory(prev => [entry, ...prev]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -477,6 +529,7 @@ function App() {
           onRequestChange={handleRequestChange}
           onUpdateVariable={handleUpdateVariable}
           isLoading={isLoading}
+          requestHistory={requestHistory}
         />
 
         <ResponsePanel

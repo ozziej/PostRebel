@@ -1,8 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ApiRequest, Environment } from '../types';
+import { ApiRequest, Environment, RequestHistoryEntry } from '../types';
 import { KeyValueEditor } from './KeyValueEditor';
 import { VariableInput } from './VariableInput';
 import jsonlint from 'jsonlint-mod';
+
+function formatRelativeTime(isoDate: string): string {
+  const now = Date.now();
+  const then = new Date(isoDate).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  return new Date(isoDate).toLocaleDateString();
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function statusColor(status: number): string {
+  if (status >= 200 && status < 300) return '#4ade80';
+  if (status >= 300 && status < 400) return '#facc15';
+  if (status >= 400) return '#f87171';
+  return '#888';
+}
 
 interface RequestPanelProps {
   request: ApiRequest | null;
@@ -11,6 +39,7 @@ interface RequestPanelProps {
   onRequestChange: (request: ApiRequest) => void;
   onUpdateVariable?: (varName: string, newValue: string) => void;
   isLoading: boolean;
+  requestHistory?: RequestHistoryEntry[];
 }
 
 export const RequestPanel: React.FC<RequestPanelProps> = ({
@@ -19,11 +48,13 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   onExecute,
   onRequestChange,
   onUpdateVariable,
-  isLoading
+  isLoading,
+  requestHistory = []
 }) => {
   const [activeTab, setActiveTab] = useState<'headers' | 'body' | 'auth' | 'scripts'>('headers');
   const [localRequest, setLocalRequest] = useState<ApiRequest | null>(null);
   const [jsonValidation, setJsonValidation] = useState<{ valid: boolean; message: string } | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -125,7 +156,93 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
         >
           {isLoading ? '...' : 'Send'}
         </button>
+        <button
+          className={`button ${showHistory ? '' : 'button-secondary'}`}
+          onClick={() => setShowHistory(!showHistory)}
+          title="Request history"
+          style={{ padding: '0.5rem 0.75rem', whiteSpace: 'nowrap' }}
+        >
+          History
+        </button>
       </div>
+
+      {showHistory && (() => {
+        const filtered = requestHistory
+          .filter(h => h.requestId === localRequest.id)
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+        return (
+          <div style={{
+            backgroundColor: '#1a1a1a',
+            border: '1px solid #404040',
+            borderRadius: '4px',
+            marginBottom: '0.5rem',
+            maxHeight: '200px',
+            overflowY: 'auto',
+          }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: '1rem', color: '#666', textAlign: 'center', fontSize: '0.85rem' }}>
+                No history for this request
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #333', color: '#888' }}>
+                    <th style={{ padding: '0.4rem 0.6rem', textAlign: 'left' }}>Time</th>
+                    <th style={{ padding: '0.4rem 0.6rem', textAlign: 'left' }}>Method</th>
+                    <th style={{ padding: '0.4rem 0.6rem', textAlign: 'left' }}>URL</th>
+                    <th style={{ padding: '0.4rem 0.6rem', textAlign: 'right' }}>Status</th>
+                    <th style={{ padding: '0.4rem 0.6rem', textAlign: 'right' }}>Duration</th>
+                    <th style={{ padding: '0.4rem 0.6rem', textAlign: 'right' }}>Size</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(entry => (
+                    <tr key={entry.id} style={{ borderBottom: '1px solid #2a2a2a' }}>
+                      <td style={{ padding: '0.4rem 0.6rem', color: '#aaa', whiteSpace: 'nowrap' }}>
+                        {formatRelativeTime(entry.timestamp)}
+                      </td>
+                      <td style={{ padding: '0.4rem 0.6rem' }}>
+                        <span style={{
+                          color: '#e0e0e0',
+                          fontWeight: 600,
+                          fontSize: '0.75rem',
+                        }}>
+                          {entry.method}
+                        </span>
+                      </td>
+                      <td style={{
+                        padding: '0.4rem 0.6rem',
+                        color: '#ccc',
+                        maxWidth: '200px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {entry.url}
+                      </td>
+                      <td style={{
+                        padding: '0.4rem 0.6rem',
+                        textAlign: 'right',
+                        fontWeight: 600,
+                        color: statusColor(entry.status),
+                      }}>
+                        {entry.status || '---'}
+                      </td>
+                      <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right', color: '#aaa' }}>
+                        {entry.time}ms
+                      </td>
+                      <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right', color: '#aaa' }}>
+                        {formatSize(entry.size)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="request-tabs">
         <button

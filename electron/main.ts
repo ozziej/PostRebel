@@ -64,7 +64,7 @@ const createWindow = async () => {
     mainWindow.maximize();
   }
 
-  // Save window bounds on close
+  // Save window bounds on close and truncate history
   mainWindow.on('close', async () => {
     try {
       const currentSettings = await getSettings();
@@ -79,6 +79,41 @@ const createWindow = async () => {
         isMaximized
       };
       await saveSettings(currentSettings);
+
+      // Truncate history for all workspaces
+      const maxPerRequest = currentSettings.historyMaxPerRequest || 10;
+      try {
+        const workspacesDir = await getWorkspacesBaseDir();
+        const entries = await fs.readdir(workspacesDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            const historyPath = path.join(workspacesDir, entry.name, 'history', 'history.json');
+            try {
+              const content = await fs.readFile(historyPath, 'utf-8');
+              const historyEntries: any[] = JSON.parse(content);
+
+              const grouped: Record<string, any[]> = {};
+              for (const h of historyEntries) {
+                if (!grouped[h.requestId]) grouped[h.requestId] = [];
+                grouped[h.requestId].push(h);
+              }
+
+              const truncated: any[] = [];
+              for (const group of Object.values(grouped)) {
+                group.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                truncated.push(...group.slice(0, maxPerRequest));
+              }
+
+              truncated.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+              await fs.writeFile(historyPath, JSON.stringify(truncated, null, 2));
+            } catch {
+              // No history file for this workspace, skip
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Electron] Failed to truncate history:', error);
+      }
     } catch (error) {
       console.error('[Electron] Failed to save window bounds:', error);
     }
@@ -722,6 +757,75 @@ ipcMain.handle('select-json-file', async () => {
 
     const content = await fs.readFile(result.filePaths[0], 'utf-8');
     return { success: true, content };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+// History management
+ipcMain.handle('load-history', async (event, workspaceId) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const historyPath = path.join(workspacePath, 'history', 'history.json');
+    const content = await fs.readFile(historyPath, 'utf-8');
+    return { success: true, entries: JSON.parse(content) };
+  } catch {
+    return { success: true, entries: [] };
+  }
+});
+
+ipcMain.handle('save-history-entry', async (event, workspaceId, entry) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const historyDir = path.join(workspacePath, 'history');
+    await fs.mkdir(historyDir, { recursive: true });
+    const historyPath = path.join(historyDir, 'history.json');
+
+    let entries: any[] = [];
+    try {
+      const content = await fs.readFile(historyPath, 'utf-8');
+      entries = JSON.parse(content);
+    } catch {
+      // File doesn't exist yet
+    }
+
+    entries.push(entry);
+    await fs.writeFile(historyPath, JSON.stringify(entries, null, 2));
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('truncate-history', async (event, workspaceId, maxPerRequest) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const historyPath = path.join(workspacePath, 'history', 'history.json');
+
+    let entries: any[] = [];
+    try {
+      const content = await fs.readFile(historyPath, 'utf-8');
+      entries = JSON.parse(content);
+    } catch {
+      return { success: true };
+    }
+
+    // Group by requestId, keep only most recent N per group
+    const grouped: Record<string, any[]> = {};
+    for (const entry of entries) {
+      if (!grouped[entry.requestId]) grouped[entry.requestId] = [];
+      grouped[entry.requestId].push(entry);
+    }
+
+    const truncated: any[] = [];
+    for (const group of Object.values(grouped)) {
+      group.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      truncated.push(...group.slice(0, maxPerRequest));
+    }
+
+    truncated.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    await fs.writeFile(historyPath, JSON.stringify(truncated, null, 2));
+    return { success: true };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }

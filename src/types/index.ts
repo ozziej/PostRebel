@@ -62,6 +62,18 @@ export interface Certificate {
   type: 'ca' | 'client'; // CA certificate or client certificate
 }
 
+export interface RequestHistoryEntry {
+  id: string;
+  requestId: string;
+  timestamp: string;
+  method: string;
+  url: string;
+  status: number;
+  statusText: string;
+  time: number;
+  size: number;
+}
+
 export interface ApiResponse {
   status: number;
   statusText: string;
@@ -121,6 +133,11 @@ declare global {
 
       // Import
       selectJsonFile: () => Promise<{ success: boolean; content?: string; error?: string }>;
+
+      // History
+      loadHistory: (workspaceId: string) => Promise<{ success: boolean; entries?: RequestHistoryEntry[]; error?: string }>;
+      saveHistoryEntry: (workspaceId: string, entry: RequestHistoryEntry) => Promise<{ success: boolean; error?: string }>;
+      truncateHistory: (workspaceId: string, maxPerRequest: number) => Promise<{ success: boolean; error?: string }>;
     };
   }
 }

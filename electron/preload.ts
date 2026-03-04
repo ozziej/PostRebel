@@ -37,6 +37,11 @@ export interface ElectronAPI {
 
   // Import
   selectJsonFile: () => Promise<{ success: boolean; content?: string; error?: string }>;
+
+  // History
+  loadHistory: (workspaceId: string) => Promise<any>;
+  saveHistoryEntry: (workspaceId: string, entry: any) => Promise<any>;
+  truncateHistory: (workspaceId: string, maxPerRequest: number) => Promise<any>;
 }
 
 const api: ElectronAPI = {
@@ -76,6 +81,11 @@ const api: ElectronAPI = {
 
   // Import
   selectJsonFile: () => ipcRenderer.invoke('select-json-file'),
+
+  // History
+  loadHistory: (workspaceId) => ipcRenderer.invoke('load-history', workspaceId),
+  saveHistoryEntry: (workspaceId, entry) => ipcRenderer.invoke('save-history-entry', workspaceId, entry),
+  truncateHistory: (workspaceId, maxPerRequest) => ipcRenderer.invoke('truncate-history', workspaceId, maxPerRequest),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

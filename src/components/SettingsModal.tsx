@@ -10,6 +10,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose
 }) => {
   const [workspacesDirectory, setWorkspacesDirectory] = useState('');
+  const [historyMaxPerRequest, setHistoryMaxPerRequest] = useState(10);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -25,6 +26,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const result = await window.electronAPI.getSettings();
       if (result.success && result.settings) {
         setWorkspacesDirectory(result.settings.workspacesDirectory || '');
+        setHistoryMaxPerRequest(result.settings.historyMaxPerRequest ?? 10);
       }
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -155,6 +157,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               }}>
                 <strong>💡 Tip:</strong> Store workspaces in a cloud-synced folder (Dropbox, Google Drive, iCloud)
                 to keep them backed up and accessible across devices.
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <h3 style={{ marginTop: 0 }}>Request History</h3>
+              <p style={{ fontSize: '0.9rem', color: '#aaa', marginBottom: '1rem' }}>
+                Configure how many history entries to keep per request. Older entries are pruned when the app closes.
+              </p>
+
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <label style={{ whiteSpace: 'nowrap' }}>Max entries per request</label>
+                <input
+                  type="number"
+                  value={historyMaxPerRequest}
+                  onChange={(e) => {
+                    const val = Math.max(1, Math.min(100, parseInt(e.target.value) || 1));
+                    setHistoryMaxPerRequest(val);
+                    window.electronAPI.savePreference('historyMaxPerRequest', val);
+                  }}
+                  min={1}
+                  max={100}
+                  className="form-input"
+                  style={{ width: '80px' }}
+                  disabled={isSaving}
+                />
               </div>
             </div>
 
