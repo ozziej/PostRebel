@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ApiRequest, Environment } from '../types';
 import { KeyValueEditor } from './KeyValueEditor';
 import { VariableInput } from './VariableInput';
+import jsonlint from 'jsonlint-mod';
 
 interface RequestPanelProps {
   request: ApiRequest | null;
   environment: Environment | null;
   onExecute: (request: ApiRequest) => void;
   onRequestChange: (request: ApiRequest) => void;
+  onUpdateVariable?: (varName: string, newValue: string) => void;
   isLoading: boolean;
 }
 
@@ -16,14 +18,48 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   environment,
   onExecute,
   onRequestChange,
+  onUpdateVariable,
   isLoading
 }) => {
   const [activeTab, setActiveTab] = useState<'headers' | 'body' | 'auth' | 'scripts'>('headers');
   const [localRequest, setLocalRequest] = useState<ApiRequest | null>(null);
+  const [jsonValidation, setJsonValidation] = useState<{ valid: boolean; message: string } | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setLocalRequest(request);
   }, [request]);
+
+  // Debounced JSON validation
+  const rawBody = localRequest?.body?.type === 'raw' ? (localRequest.body.data as string) : '';
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (!rawBody || rawBody.trim() === '') {
+      setJsonValidation(null);
+      return;
+    }
+
+    debounceRef.current = setTimeout(() => {
+      // Replace {{variables}} with placeholder strings before validating.
+      // Also consume surrounding quotes if present, so "{{var}}" doesn't become ""__placeholder__""
+      const sanitized = rawBody.replace(/"?\{\{\w+\}\}"?/g, '"__placeholder__"');
+
+      try {
+        jsonlint.parse(sanitized);
+        setJsonValidation({ valid: true, message: 'Valid JSON' });
+      } catch (err: any) {
+        const msg = err.message || 'Invalid JSON';
+        // Extract just the first line of the error for a compact display
+        const firstLine = msg.split('\n')[0];
+        setJsonValidation({ valid: false, message: firstLine });
+      }
+    }, 300);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [rawBody]);
 
   if (!localRequest) {
     return (
@@ -77,6 +113,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
           value={localRequest.url}
           onChange={(value) => updateRequest({ url: value })}
           environment={environment}
+          onUpdateVariable={onUpdateVariable}
           placeholder="Enter request URL"
           className="url-input"
         />
@@ -138,6 +175,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                 value={value}
                 onChange={(val) => updateHeader(key, val)}
                 environment={environment}
+                onUpdateVariable={onUpdateVariable}
                 placeholder="Header value"
                 className="form-input"
                 style={{ flex: 1 }}
@@ -192,20 +230,36 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
           </div>
 
           {localRequest.body?.type === 'raw' ? (
-            <VariableInput
-              value={typeof localRequest.body?.data === 'string' ? localRequest.body.data : ''}
-              onChange={(value) => updateRequest({
-                body: {
-                  type: 'raw',
-                  data: value
-                }
-              })}
-              environment={environment}
-              placeholder='{\n  "key": "value"\n}'
-              className="form-textarea"
-              style={{ minHeight: '200px' }}
-              multiline={true}
-            />
+            <>
+              <VariableInput
+                value={typeof localRequest.body?.data === 'string' ? localRequest.body.data : ''}
+                onChange={(value) => updateRequest({
+                  body: {
+                    type: 'raw',
+                    data: value
+                  }
+                })}
+                environment={environment}
+                onUpdateVariable={onUpdateVariable}
+                placeholder='{\n  "key": "value"\n}'
+                className="form-textarea"
+                style={{ minHeight: '200px' }}
+                multiline={true}
+              />
+              {jsonValidation && (
+                <div style={{
+                  padding: '0.3rem 0.6rem',
+                  fontSize: '0.78rem',
+                  fontFamily: 'monospace',
+                  color: jsonValidation.valid ? '#4ade80' : '#f87171',
+                  backgroundColor: jsonValidation.valid ? 'rgba(74, 222, 128, 0.08)' : 'rgba(248, 113, 113, 0.08)',
+                  borderRadius: '0 0 4px 4px',
+                  marginTop: '-1px',
+                }}>
+                  {jsonValidation.valid ? '\u2713 ' : '\u2717 '}{jsonValidation.message}
+                </div>
+              )}
+            </>
           ) : (
             <KeyValueEditor
               data={localRequest.body?.formData || []}
@@ -218,6 +272,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
               })}
               placeholder={{ key: 'Parameter name', value: 'Parameter value' }}
               environment={environment}
+              onUpdateVariable={onUpdateVariable}
               allowSecrets={true}
             />
           )}
@@ -254,6 +309,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                   auth: { type: 'bearer', bearer: value }
                 })}
                 environment={environment}
+                onUpdateVariable={onUpdateVariable}
                 placeholder="{{token}} or paste token here"
                 className="form-input"
               />
@@ -276,6 +332,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                     }
                   })}
                   environment={environment}
+                  onUpdateVariable={onUpdateVariable}
                   className="form-input"
                 />
               </div>
@@ -293,6 +350,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                     }
                   })}
                   environment={environment}
+                  onUpdateVariable={onUpdateVariable}
                   className="form-input"
                 />
               </div>
@@ -308,6 +366,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                   auth: { type: 'jwt', jwt: value }
                 })}
                 environment={environment}
+                onUpdateVariable={onUpdateVariable}
                 placeholder="{{jwt_token}} or paste JWT here"
                 className="form-input"
               />

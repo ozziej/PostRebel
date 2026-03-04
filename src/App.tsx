@@ -173,6 +173,22 @@ function App() {
     return { success: true };
   };
 
+  const handleUpdateVariable = async (varName: string, newValue: string) => {
+    if (!activeEnvironment) return;
+    const existsInArray = activeEnvironment.variablesArray?.some(v => v.key === varName);
+    const updatedArray = existsInArray
+      ? activeEnvironment.variablesArray?.map(v =>
+          v.key === varName ? { ...v, value: newValue } : v
+        )
+      : [...(activeEnvironment.variablesArray || []), { key: varName, value: newValue, isSecret: false }];
+    const updatedEnvironment: Environment = {
+      ...activeEnvironment,
+      variables: { ...activeEnvironment.variables, [varName]: newValue },
+      variablesArray: updatedArray
+    };
+    await saveEnvironment(updatedEnvironment);
+  };
+
   const handleRequestChange = async (updatedRequest: ApiRequest) => {
     // Update the active request state
     setActiveRequest(updatedRequest);
@@ -421,6 +437,7 @@ function App() {
           environment={activeEnvironment}
           onExecute={executeRequest}
           onRequestChange={handleRequestChange}
+          onUpdateVariable={handleUpdateVariable}
           isLoading={isLoading}
         />
 

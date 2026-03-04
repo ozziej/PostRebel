@@ -7,6 +7,7 @@ interface KeyValueEditorProps {
   onChange: (data: KeyValuePair[]) => void;
   placeholder?: { key: string; value: string };
   environment?: Environment | null;
+  onUpdateVariable?: (varName: string, newValue: string) => void;
   allowSecrets?: boolean; // Show secret checkbox
 }
 
@@ -15,6 +16,7 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
   onChange,
   placeholder = { key: 'Key', value: 'Value' },
   environment,
+  onUpdateVariable,
   allowSecrets = false
 }) => {
   const [bulkMode, setBulkMode] = useState(false);
@@ -150,6 +152,7 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
                   value={item.value}
                   onChange={(value) => updateRow(index, 'value', value)}
                   environment={environment}
+                  onUpdateVariable={onUpdateVariable}
                   placeholder={placeholder.value}
                   className="form-input"
                   style={{ flex: 1, opacity: item.enabled ? 1 : 0.5 }}
