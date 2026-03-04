@@ -1,3 +1,4 @@
+![PostRebel Logo](assets/logo.png)
 # PostRebel
 
 A local API testing tool with git support - your Postman alternative.
