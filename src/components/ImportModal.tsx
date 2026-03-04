@@ -8,15 +8,17 @@ export type ImportTab = 'collection' | 'environment' | 'curl';
 interface ImportModalProps {
   isOpen: boolean;
   initialTab?: ImportTab;
+  collections: Collection[];
   onClose: () => void;
   onImportCollection: (collection: Collection, collectionVariables?: Environment) => void;
   onImportEnvironment: (environment: Environment) => void;
-  onImportCurl: (request: ApiRequest) => void;
+  onImportCurl: (request: ApiRequest, collectionId: string | null, newCollectionName?: string) => void;
 }
 
 export const ImportModal: React.FC<ImportModalProps> = ({
   isOpen,
   initialTab = 'collection',
+  collections,
   onClose,
   onImportCollection,
   onImportEnvironment,
@@ -28,6 +30,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [preview, setPreview] = useState<any>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [parseError, setParseError] = useState('');
+  const [curlRequestName, setCurlRequestName] = useState('');
+  const [curlTargetCollection, setCurlTargetCollection] = useState('__new__');
+  const [curlNewCollectionName, setCurlNewCollectionName] = useState('');
 
   // Reset when tab changes
   const switchTab = (tab: ImportTab) => {
@@ -37,6 +42,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setPreview(null);
     setErrors([]);
     setParseError('');
+    setCurlRequestName('');
+    setCurlTargetCollection('__new__');
+    setCurlNewCollectionName('');
   };
 
   // Reset when modal opens with a new tab
@@ -107,6 +115,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       const result = parseCurl(input);
       setPreview(result);
       setErrors(result.errors);
+      setCurlRequestName(result.request.name);
+      setCurlNewCollectionName(result.request.name);
     } catch (e: any) {
       setParseError(e.message);
     }
@@ -122,7 +132,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       onImportEnvironment(preview.environment);
       onClose();
     } else if (activeTab === 'curl') {
-      onImportCurl(preview.request);
+      const request = { ...preview.request, name: curlRequestName || preview.request.name };
+      const targetId = curlTargetCollection === '__new__' ? null : curlTargetCollection;
+      onImportCurl(request, targetId, curlNewCollectionName);
       onClose();
     }
   };
@@ -377,6 +389,54 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     <span> | Auth: {preview.request.auth.type}</span>
                   )}
                 </div>
+
+                {/* Request name */}
+                <div style={{ marginTop: '1rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
+                    Request name
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={curlRequestName}
+                    onChange={(e) => setCurlRequestName(e.target.value)}
+                    style={{ width: '100%', fontSize: '0.85rem' }}
+                  />
+                </div>
+
+                {/* Target collection */}
+                <div style={{ marginTop: '0.75rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
+                    Add to collection
+                  </label>
+                  <select
+                    className="form-input"
+                    value={curlTargetCollection}
+                    onChange={(e) => setCurlTargetCollection(e.target.value)}
+                    style={{ width: '100%', fontSize: '0.85rem' }}
+                  >
+                    {collections.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                    <option value="__new__">+ New collection</option>
+                  </select>
+                </div>
+
+                {/* New collection name */}
+                {curlTargetCollection === '__new__' && (
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
+                      New collection name
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={curlNewCollectionName}
+                      onChange={(e) => setCurlNewCollectionName(e.target.value)}
+                      style={{ width: '100%', fontSize: '0.85rem' }}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>

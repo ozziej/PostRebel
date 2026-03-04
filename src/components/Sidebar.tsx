@@ -257,7 +257,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     autoFocus
                   />
                 ) : (
-                  <span>{collection.name}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{collection.name}</span>
                 )}
               </button>
 
@@ -374,12 +374,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ) : (
                       <>
                         <div
-                          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0, overflow: 'hidden' }}
                         >
                           <span className={`http-method ${request.method}`}>
                             {request.method}
                           </span>
-                          <span>{request.name}</span>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{request.name}</span>
                         </div>
                         <button
                           onClick={(e) => {

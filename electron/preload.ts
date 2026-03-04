@@ -11,6 +11,7 @@ export interface ElectronAPI {
   // Collection management
   saveCollection: (workspaceId: string | undefined, data: any) => Promise<any>;
   loadCollections: (workspaceId?: string) => Promise<any>;
+  deleteCollection: (workspaceId: string | undefined, collectionName: string) => Promise<any>;
 
   // Environment management
   saveEnvironment: (workspaceId: string | undefined, data: any) => Promise<any>;
@@ -55,6 +56,7 @@ const api: ElectronAPI = {
   // Collection management
   saveCollection: (workspaceId, data) => ipcRenderer.invoke('save-collection', workspaceId, data),
   loadCollections: (workspaceId) => ipcRenderer.invoke('load-collections', workspaceId),
+  deleteCollection: (workspaceId, collectionName) => ipcRenderer.invoke('delete-collection', workspaceId, collectionName),
 
   // Environment management
   saveEnvironment: (workspaceId, data) => ipcRenderer.invoke('save-environment', workspaceId, data),

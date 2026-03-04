@@ -112,6 +112,24 @@ export function parseCurl(curlString: string): CurlParseResult {
       }
     } else if (token === '--compressed') {
       hasCompressed = true;
+    } else if (token === '--head' || token === '-I') {
+      if (!method) method = 'HEAD';
+    } else if (token === '--get' || token === '-G') {
+      if (!method) method = 'GET';
+    } else if ([
+      '--location', '-L', '--insecure', '-k', '--verbose', '-v',
+      '--silent', '-s', '--show-error', '-S', '--fail', '-f',
+      '--http1.1', '--http2',
+    ].includes(token)) {
+      // Boolean flags — skip
+    } else if ([
+      '--max-time', '--connect-timeout', '-m', '--retry', '--retry-delay',
+      '--retry-max-time', '-o', '--output', '-e', '--referer', '-A',
+      '--user-agent', '-w', '--write-out', '--resolve', '--cacert',
+      '--cert', '--key', '-x', '--proxy', '-U', '--proxy-user',
+    ].includes(token)) {
+      // Flags that consume the next token — skip flag + argument
+      i++;
     } else if (!token.startsWith('-') && !url) {
       // First non-flag token is the URL
       url = token;
@@ -182,14 +200,14 @@ export function parseCurl(curlString: string): CurlParseResult {
     };
   }
 
-  // Generate name from URL
+  // Generate name from URL (domain + path only, no protocol/query)
   let name = 'Imported Request';
   try {
     const parsed = new URL(url);
-    name = parsed.hostname + (parsed.pathname !== '/' ? parsed.pathname : '');
+    name = parsed.host + (parsed.pathname !== '/' ? parsed.pathname : '');
   } catch {
-    // URL might have template variables, just use it as-is
-    name = url.substring(0, 60);
+    // URL might have template variables — strip protocol if present
+    name = url.replace(/^https?:\/\//, '').substring(0, 60);
   }
 
   const request: ApiRequest = {

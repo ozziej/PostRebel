@@ -169,8 +169,12 @@ function App() {
   };
 
   const deleteCollection = async (collectionId: string) => {
+    const collection = collections.find(c => c.id === collectionId);
     setCollections(prev => prev.filter(c => c.id !== collectionId));
-    // Note: We're just removing from state. In a real app, you'd also delete the file
+    if (collection) {
+      const workspaceId = activeWorkspace?.id;
+      await window.electronAPI.deleteCollection(workspaceId, collection.name);
+    }
     return { success: true };
   };
 
@@ -376,13 +380,30 @@ function App() {
     console.log('[App] Imported environment:', environment.name);
   };
 
-  const handleImportCurl = async (request: ApiRequest) => {
-    const newCollection: Collection = {
-      id: Date.now().toString(),
-      name: request.name || 'Imported from cURL',
-      requests: [request],
-    };
-    await saveCollection(newCollection);
+  const handleImportCurl = async (
+    request: ApiRequest,
+    collectionId: string | null,
+    newCollectionName?: string
+  ) => {
+    if (collectionId) {
+      // Add to existing collection
+      const collection = collections.find(c => c.id === collectionId);
+      if (collection) {
+        const updated = {
+          ...collection,
+          requests: [...collection.requests, request],
+        };
+        await saveCollection(updated);
+      }
+    } else {
+      // Create new collection
+      const newCollection: Collection = {
+        id: Date.now().toString(),
+        name: newCollectionName || request.name || 'Imported from cURL',
+        requests: [request],
+      };
+      await saveCollection(newCollection);
+    }
     setActiveRequest(request);
     console.log('[App] Imported curl request:', request.name);
   };
@@ -585,6 +606,7 @@ function App() {
       <ImportModal
         isOpen={showImportModal}
         initialTab={importModalTab}
+        collections={collections}
         onClose={() => setShowImportModal(false)}
         onImportCollection={handleImportCollection}
         onImportEnvironment={handleImportEnvironment}

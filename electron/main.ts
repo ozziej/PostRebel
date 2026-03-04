@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { simpleGit } from 'simple-git';
@@ -539,6 +539,35 @@ ipcMain.handle('load-collections', async (event, workspaceId) => {
     return { success: true, collections };
   } catch (error) {
     return { success: true, collections: [] }; // Empty if directory doesn't exist
+  }
+});
+
+ipcMain.handle('delete-collection', async (event, workspaceId, collectionName) => {
+  try {
+    const basePath = await getWorkspacePath(workspaceId);
+    const collectionsDir = path.join(basePath, 'collections');
+    const sanitizedName = sanitizeFilename(collectionName);
+    const filePath = path.join(collectionsDir, `${sanitizedName}.json`);
+    const secretsPath = path.join(collectionsDir, `${sanitizedName}.secrets.json`);
+
+    // Move to trash instead of permanent delete
+    try {
+      await shell.trashItem(filePath);
+      console.log('[Electron] Trashed collection file:', filePath);
+    } catch (err) {
+      // File might not exist
+    }
+
+    try {
+      await shell.trashItem(secretsPath);
+      console.log('[Electron] Trashed collection secrets file:', secretsPath);
+    } catch (err) {
+      // Secrets file might not exist
+    }
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 });
 

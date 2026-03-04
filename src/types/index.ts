@@ -107,6 +107,7 @@ declare global {
       // Collection management (workspace-aware)
       saveCollection: (workspaceId: string | undefined, data: Collection) => Promise<{ success: boolean; path?: string; error?: string }>;
       loadCollections: (workspaceId?: string) => Promise<{ success: boolean; collections: Collection[] }>;
+      deleteCollection: (workspaceId: string | undefined, collectionName: string) => Promise<{ success: boolean; error?: string }>;
 
       // Environment management (workspace-aware, with secrets)
       saveEnvironment: (workspaceId: string | undefined, data: Environment) => Promise<{ success: boolean; path?: string; error?: string }>;
