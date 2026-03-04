@@ -30,6 +30,8 @@ Each workspace is stored in its own folder: `./workspaces/{workspace-id}/`
     /collections/
       api-tests.json            # Requests without secrets (COMMITTED)
       api-tests.secrets.json    # Secret form parameters (GITIGNORED)
+    /history/
+      history.json              # Request execution history (LOCAL ONLY)
 ```
 
 ## Creating a Workspace
@@ -161,14 +163,16 @@ cd workspaces/my-workspace-id/
 - No risk of committing secrets
 - Easy onboarding for new team members
 
-## Current Workspace Limitations
+## Current Workspace Features
 
-The current implementation:
-- ✅ Workspace creation and switching
+The current implementation includes:
+- ✅ Workspace creation, editing, and deletion
 - ✅ Automatic secrets splitting/merging
 - ✅ Git initialization per workspace
 - ✅ Visual indicators for secrets
-- ⚠️ Backward compatible (works without workspaces)
+- ✅ Per-request execution history with configurable retention
+- ✅ Configurable workspaces storage directory
+- ✅ Backward compatible (works without workspaces)
 
 Note: If you have existing collections/environments in the old structure (root-level `collections/` and `environments/` folders), they will still work. Select "No Workspace" in the dropdown to access them.
 
@@ -325,5 +329,4 @@ Planned features:
 - Workspace templates
 - Encrypted secrets storage
 - Cloud sync for secrets (optional)
-- Team permission management
 - Workspace search/filter

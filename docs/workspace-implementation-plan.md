@@ -1,7 +1,7 @@
-# Workspace & Secrets Implementation Plan
+# Workspace & Secrets Implementation Plan (COMPLETED)
 
 ## Overview
-Implement a workspace-based project structure with automatic secrets management to prevent credentials from being committed to git.
+Implement a workspace-based project structure with automatic secrets management to prevent credentials from being committed to git. **This plan has been fully implemented.**
 
 ## Folder Structure
 
@@ -139,10 +139,8 @@ if (fs.existsSync('./collections') || fs.existsSync('./environments')) {
 - No data loss
 - Can continue using immediately
 
-## Questions for Review
-1. Should workspaces be in `/workspaces/` or user-selectable folders?
-2. Auto-create "Default" workspace on first run?
-3. Allow multiple workspaces to be open simultaneously?
-4. Export/import workspace feature?
-
-Please review and approve before I proceed with implementation.
+## Resolved Questions
+1. **Workspaces location** — User-selectable via Settings (defaults to `~/PostRebelWorkspaces`).
+2. **Auto-create default** — No auto-create; users create workspaces on demand.
+3. **Multiple workspaces open** — One active workspace at a time; switch via the top bar dropdown.
+4. **Export/import** — Not yet implemented; on the roadmap.

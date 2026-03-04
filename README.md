@@ -19,6 +19,7 @@ A local API testing tool with git support - your Postman alternative.
 - **Form data** - x-www-form-urlencoded and multipart form-data body types
 - **Workspace management** - Organize projects into separate workspaces, each with their own git repo
 - **Secrets management** - Mark variables and form parameters as secret; secrets are automatically split into `.secrets.json` files and gitignored
+- **Request history** - Per-request execution log showing status, timing, and size; persisted per workspace and auto-pruned to a configurable maximum
 
 ## Quick Start
 
@@ -50,6 +51,8 @@ PostRebel/
 │       ├── environments/           # Environment configs (committed)
 │       │   ├── dev.json            # Public variables
 │       │   └── dev.secrets.json    # Secret variables (gitignored)
+│       ├── history/                # Request execution history
+│       │   └── history.json        # Log entries (local only)
 │       └── certificates/           # Custom certificates (NOT committed)
 ├── src/                  # React app source
 ├── electron/            # Electron main process
@@ -100,6 +103,15 @@ if (response.access_token) {
     pm.environment.set("token", response.access_token);
 }
 ```
+
+### Request History
+
+Every time you execute a request, PostRebel records the result (method, resolved URL, status code, response time, and size) in a per-workspace history log.
+
+- Click the **History** button next to **Send** to toggle the history panel for the active request.
+- Entries are sorted newest-first and color-coded by status (green for 2xx, yellow for 3xx, red for 4xx/5xx).
+- History is stored on disk at `{workspace}/history/history.json` and persists across sessions.
+- On app exit, entries are automatically pruned to a configurable maximum per request (default 10). Change this in **Settings > Request History**.
 
 ### Certificate Management
 
@@ -174,7 +186,6 @@ npm run dist         # Create distributable packages
 ## Roadmap
 
 🚧 **Planned Features:**
-- Request history
 - Collection runner (batch/sequential request execution)
 - File upload support in form-data bodies
 - Collection export

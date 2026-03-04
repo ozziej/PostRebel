@@ -1,17 +1,27 @@
-I'm currently using postman to test APIs, they have just changed their licencing agreements and I'm now unable to use collections that I created.
-Bruno is a half-baked alternative, and I do not like it.
-I want to create an application that runs on Mac OS X, Linux and Windows that is similar to postman
-MVP:
- - Must support git repositories to allow for sharing of files 
-    - store files locally, within a git commited repo
-    - keep environment values in a separate file that is automatically added to the .gitignore to ensure that secrets are not persisted / saved to a git repo.
- - Must be able to import Postman V2 JSON files (collections and Environment collections)
- - Must be scriptable and compatible with Postmans Javascript Scripting 
- - Must allow mustached braces for environment variables like postman to allow for distinction between test / production
- - Must support customisable Headers 
- - Must support HTML x-www-form-urlencoded, form-data and raw bodies (JSON format at a minimum)
- - Must support all REST style, GET,POST,PUT,PATCH, DELETE, HEAD, OPTIONS
- - Must support authorization using Basic Auth, JWT Auth, Bearer Token on All the above requests
+# PostRebel MVP Requirements (ALL COMPLETED)
 
-Ideally this should use a similar engine, perhaps the chromium engine to allow for Javascript and debug outputs
-If there is already an engine that can do this, re-use, try not to re-write everything if there is something similar / compatible already available.
+Original motivation: Postman changed their licensing, making existing collections inaccessible. Bruno was evaluated and rejected. Goal: build a cross-platform (macOS, Linux, Windows) Postman alternative.
+
+## MVP Checklist
+
+- [x] Git repository support — store files locally in a git-committed repo
+- [x] Secrets isolation — environment values in a separate `.secrets.json` file, auto-added to `.gitignore`
+- [x] Import Postman V2 JSON files (collections and environments)
+- [x] cURL import
+- [x] Scriptable with Postman-compatible `pm` object (pre-request and test scripts)
+- [x] `{{variable}}` mustache-brace syntax for environment variables
+- [x] Customisable headers
+- [x] x-www-form-urlencoded, form-data, and raw (JSON) request bodies
+- [x] All REST methods: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
+- [x] Authorization: Basic Auth, JWT Auth, Bearer Token
+- [x] Electron + Chromium engine for JavaScript and debug outputs
+
+## Beyond MVP (also completed)
+
+- [x] Workspace management with per-workspace git repos
+- [x] Certificate management for internal/self-signed HTTPS APIs
+- [x] Secrets management with visual indicators and automatic split/merge
+- [x] Per-request execution history with configurable retention
+- [x] JSON body linting
+- [x] Variable autocomplete
+- [x] Configurable workspaces storage directory

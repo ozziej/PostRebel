@@ -218,3 +218,11 @@ This means the Electron preload script is stale. Rebuild and restart:
 npm run build:electron
 # Then restart the Electron process
 ```
+
+### Request history not appearing
+
+History is stored per workspace at `{workspace}/history/history.json`. If the file is missing or the workspace directory is not writable, entries won't persist. Check:
+
+1. A workspace is selected (history is not recorded without one).
+2. The workspace folder exists and is writable.
+3. Restart the app — history is loaded from disk on workspace switch.
