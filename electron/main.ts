@@ -38,14 +38,49 @@ async function getWorkspacesBaseDir(): Promise<string> {
   return settings.workspacesDirectory;
 }
 
-const createWindow = () => {
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+const createWindow = async () => {
+  const settings = await getSettings();
+  const wb = settings.windowBounds;
+
+  const windowOptions: Electron.BrowserWindowConstructorOptions = {
+    width: wb?.width || 1200,
+    height: wb?.height || 800,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js')
+    }
+  };
+
+  // Only set position if we have saved bounds
+  if (wb?.x !== undefined && wb?.y !== undefined) {
+    windowOptions.x = wb.x;
+    windowOptions.y = wb.y;
+  }
+
+  mainWindow = new BrowserWindow(windowOptions);
+
+  if (wb?.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  // Save window bounds on close
+  mainWindow.on('close', async () => {
+    try {
+      const currentSettings = await getSettings();
+      const isMaximized = mainWindow.isMaximized();
+      // Save the restored (non-maximized) bounds so un-maximizing restores correctly
+      const bounds = isMaximized ? (mainWindow.getNormalBounds?.() || mainWindow.getBounds()) : mainWindow.getBounds();
+      currentSettings.windowBounds = {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        isMaximized
+      };
+      await saveSettings(currentSettings);
+    } catch (error) {
+      console.error('[Electron] Failed to save window bounds:', error);
     }
   });
 
@@ -147,6 +182,17 @@ ipcMain.handle('get-settings', async () => {
 ipcMain.handle('update-settings', async (event, newSettings) => {
   try {
     await saveSettings(newSettings);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('save-preference', async (event, key: string, value: any) => {
+  try {
+    const settings = await getSettings();
+    settings[key] = value;
+    await saveSettings(settings);
     return { success: true };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };

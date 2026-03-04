@@ -32,6 +32,7 @@ export interface ElectronAPI {
   // Settings
   getSettings: () => Promise<any>;
   updateSettings: (settings: any) => Promise<any>;
+  savePreference: (key: string, value: any) => Promise<any>;
   chooseWorkspaceDirectory: () => Promise<any>;
 
   // Import
@@ -70,6 +71,7 @@ const api: ElectronAPI = {
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   updateSettings: (settings) => ipcRenderer.invoke('update-settings', settings),
+  savePreference: (key, value) => ipcRenderer.invoke('save-preference', key, value),
   chooseWorkspaceDirectory: () => ipcRenderer.invoke('choose-workspace-directory'),
 
   // Import

@@ -36,6 +36,7 @@ module.exports = {
       template: './public/index.html'
     })
   ],
+  performance: false,
   devServer: {
     port: 3000,
     hot: true

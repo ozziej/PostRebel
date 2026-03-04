@@ -5,17 +5,25 @@ interface ResizableSidebarProps {
   minWidth?: number;
   maxWidth?: number;
   defaultWidth?: number;
+  onWidthChange?: (width: number) => void;
 }
 
 export const ResizableSidebar: React.FC<ResizableSidebarProps> = ({
   children,
   minWidth = 250,
   maxWidth = 600,
-  defaultWidth = 300
+  defaultWidth = 300,
+  onWidthChange
 }) => {
   const [width, setWidth] = useState(defaultWidth);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const widthRef = useRef(defaultWidth);
+
+  useEffect(() => {
+    setWidth(defaultWidth);
+    widthRef.current = defaultWidth;
+  }, [defaultWidth]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -24,6 +32,7 @@ export const ResizableSidebar: React.FC<ResizableSidebarProps> = ({
       const newWidth = e.clientX;
       if (newWidth >= minWidth && newWidth <= maxWidth) {
         setWidth(newWidth);
+        widthRef.current = newWidth;
       }
     };
 
@@ -31,6 +40,7 @@ export const ResizableSidebar: React.FC<ResizableSidebarProps> = ({
       setIsResizing(false);
       document.body.style.cursor = 'default';
       document.body.style.userSelect = 'auto';
+      onWidthChange?.(widthRef.current);
     };
 
     if (isResizing) {
@@ -44,7 +54,7 @@ export const ResizableSidebar: React.FC<ResizableSidebarProps> = ({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing, minWidth, maxWidth]);
+  }, [isResizing, minWidth, maxWidth, onWidthChange]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();

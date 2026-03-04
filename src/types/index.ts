@@ -116,6 +116,7 @@ declare global {
       // Settings
       getSettings: () => Promise<{ success: boolean; settings?: any; error?: string }>;
       updateSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
+      savePreference: (key: string, value: any) => Promise<{ success: boolean; error?: string }>;
       chooseWorkspaceDirectory: () => Promise<{ success: boolean; directory?: string; error?: string }>;
 
       // Import

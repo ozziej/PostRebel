@@ -1,8 +1,10 @@
 node_modules/
 dist/
+release/
 .env.local
 environments/*.local.json
 certificates/
+.claude-flow/
 *.log
 .DS_Store
 .vscode/

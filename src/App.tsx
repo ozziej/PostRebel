@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace } from './types';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
@@ -33,9 +33,28 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importModalTab, setImportModalTab] = useState<ImportTab>('collection');
+  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const savedPrefsRef = useRef<{ activeWorkspaceId?: string; activeEnvironmentId?: string }>({});
 
   useEffect(() => {
-    loadWorkspaces();
+    // Load saved preferences then workspaces
+    const init = async () => {
+      try {
+        const result = await window.electronAPI.getSettings();
+        if (result.success && result.settings) {
+          const s = result.settings;
+          if (s.sidebarWidth) setSidebarWidth(s.sidebarWidth);
+          savedPrefsRef.current = {
+            activeWorkspaceId: s.activeWorkspaceId,
+            activeEnvironmentId: s.activeEnvironmentId,
+          };
+        }
+      } catch (error) {
+        console.error('Error loading preferences:', error);
+      }
+      loadWorkspaces();
+    };
+    init();
   }, []);
 
   useEffect(() => {
@@ -49,9 +68,13 @@ function App() {
       const result = await window.electronAPI.loadWorkspaces();
       if (result.success) {
         setWorkspaces(result.workspaces);
-        // Auto-select first workspace if available
+        // Auto-select saved workspace, or first workspace if available
         if (result.workspaces.length > 0 && !activeWorkspace) {
-          setActiveWorkspace(result.workspaces[0]);
+          const savedId = savedPrefsRef.current.activeWorkspaceId;
+          const savedWorkspace = savedId
+            ? result.workspaces.find((w: Workspace) => w.id === savedId)
+            : undefined;
+          setActiveWorkspace(savedWorkspace || result.workspaces[0]);
         }
       }
     } catch (error) {
@@ -72,7 +95,11 @@ function App() {
       if (environmentsResult.success) {
         setEnvironments(environmentsResult.environments);
         if (environmentsResult.environments.length > 0) {
-          setActiveEnvironment(environmentsResult.environments[0]);
+          const savedEnvId = savedPrefsRef.current.activeEnvironmentId;
+          const savedEnv = savedEnvId
+            ? environmentsResult.environments.find((e: Environment) => e.id === savedEnvId)
+            : undefined;
+          setActiveEnvironment(savedEnv || environmentsResult.environments[0]);
         }
       }
 
@@ -252,6 +279,7 @@ function App() {
   const handleSelectWorkspace = async (workspace: Workspace) => {
     setActiveWorkspace(workspace);
     await window.electronAPI.setActiveWorkspace(workspace.id);
+    window.electronAPI.savePreference('activeWorkspaceId', workspace.id);
     console.log('[App] Switched to workspace:', workspace.name);
     // Clear current data
     setCollections([]);
@@ -305,6 +333,16 @@ function App() {
     setShowEnvEditor(true);
     setShowEnvManager(false);
   };
+
+  const handleSelectEnvironment = useCallback((env: Environment) => {
+    setActiveEnvironment(env);
+    window.electronAPI.savePreference('activeEnvironmentId', env.id);
+  }, []);
+
+  const handleSidebarWidthChange = useCallback((width: number) => {
+    setSidebarWidth(width);
+    window.electronAPI.savePreference('sidebarWidth', width);
+  }, []);
 
   const openImportModal = (tab: ImportTab = 'collection') => {
     setImportModalTab(tab);
@@ -411,7 +449,7 @@ function App() {
         environments={environments}
         activeEnvironment={activeEnvironment}
         onSelectWorkspace={handleSelectWorkspace}
-        onSelectEnvironment={setActiveEnvironment}
+        onSelectEnvironment={handleSelectEnvironment}
         onOpenWorkspaceManager={() => setShowWorkspaceManager(true)}
         onOpenEnvironmentManager={() => setShowEnvManager(true)}
         onOpenCertManager={() => setShowCertManager(true)}
@@ -419,7 +457,7 @@ function App() {
       />
 
       <div className="app-body">
-        <ResizableSidebar defaultWidth={300} minWidth={250} maxWidth={600}>
+        <ResizableSidebar defaultWidth={sidebarWidth} minWidth={250} maxWidth={600} onWidthChange={handleSidebarWidthChange}>
           <Sidebar
             activeWorkspace={activeWorkspace}
             collections={collections}
@@ -470,7 +508,7 @@ function App() {
         onCreateEnvironment={handleCreateEnvironment}
         onUpdateEnvironment={handleUpdateEnvironment}
         onDeleteEnvironment={handleDeleteEnvironment}
-        onSelectEnvironment={setActiveEnvironment}
+        onSelectEnvironment={handleSelectEnvironment}
         onEditVariables={handleEditEnvironmentVariables}
         onOpenImport={() => openImportModal('environment')}
       />

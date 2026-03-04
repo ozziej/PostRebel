@@ -331,7 +331,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <div
                     key={request.id}
                     className="request-item"
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem' }}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', cursor: 'pointer' }}
+                    onClick={() => { if (editingRequest !== request.id) onSelectRequest(request); }}
                   >
                     {editingRequest === request.id ? (
                       <>
@@ -373,8 +374,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ) : (
                       <>
                         <div
-                          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, cursor: 'pointer' }}
-                          onClick={() => onSelectRequest(request)}
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}
                         >
                           <span className={`http-method ${request.method}`}>
                             {request.method}
