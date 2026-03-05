@@ -16,10 +16,13 @@ A local API testing tool with git support - your Postman alternative.
 - **Certificate management** - Import custom CA certificates for internal APIs
 - **Postman V2 collection and environment import**
 - **cURL command import**
+- **OpenAPI / Swagger import** - Import OpenAPI 3.x (3.0, 3.1) and Swagger 2.0 specs in JSON or YAML; endpoints are automatically grouped into tag-based folders within the collection
 - **Form data** - x-www-form-urlencoded and multipart form-data body types
 - **Workspace management** - Organize projects into separate workspaces, each with their own git repo
 - **Secrets management** - Mark variables and form parameters as secret; secrets are automatically split into `.secrets.json` files and gitignored
 - **Request history** - Per-request execution log showing status, timing, and size; persisted per workspace and auto-pruned to a configurable maximum
+- **Saved responses** - Snapshot and name any response for future reference; saved responses are listed under their parent request in the sidebar
+- **Collection folders** - Group requests inside a collection; folders are created automatically on OpenAPI import (one folder per tag) and can be renamed or deleted
 
 ## Quick Start
 
@@ -63,8 +66,8 @@ PostRebel/
 
 ### Making API Calls
 
-1. Select an environment from the sidebar
-2. Choose a request from a collection
+1. Select an environment from the top bar
+2. Choose a request from a collection in the sidebar
 3. Modify URL, headers, body, or auth as needed
 4. Click "Send"
 
@@ -104,6 +107,31 @@ if (response.access_token) {
 }
 ```
 
+### Importing
+
+The **⬆️ Import** button in the top menu bar opens the import dialog, which has four tabs:
+
+#### Postman Collection
+Import a Postman v2.0 or v2.1 collection JSON file. All requests, headers, body content, authentication, and pre/post scripts are preserved.
+
+#### Postman Environment
+Import a Postman environment JSON file. Variables and secret flags are preserved.
+
+#### Curl Command
+Paste a cURL command (e.g. copied from browser DevTools → "Copy as cURL") to create a new request. You can name the request and choose which collection to add it to, or create a new one.
+
+#### OpenAPI / Swagger
+Paste an OpenAPI 3.x or Swagger 2.0 spec (JSON or YAML). PostRebel will:
+- Parse all paths and HTTP methods into `ApiRequest` objects
+- Convert `{pathParam}` path parameters to `{{pathParam}}` variable syntax
+- Append required query parameters as `{{paramName}}` placeholders
+- Map security schemes (Bearer, Basic, API Key, OAuth2) to the appropriate auth type
+- Extract request body examples or generate one from the schema
+- If multiple named examples exist for an operation, create one request per example
+- Group operations by their first tag into **collection folders**; untagged operations go to the collection root
+
+You can import into an existing collection (folders will be merged in) or create a new one named after the spec title.
+
 ### Request History
 
 Every time you execute a request, PostRebel records the result (method, resolved URL, status code, response time, and size) in a per-workspace history log.
@@ -112,6 +140,25 @@ Every time you execute a request, PostRebel records the result (method, resolved
 - Entries are sorted newest-first and color-coded by status (green for 2xx, yellow for 3xx, red for 4xx/5xx).
 - History is stored on disk at `{workspace}/history/history.json` and persists across sessions.
 - On app exit, entries are automatically pruned to a configurable maximum per request (default 10). Change this in **Settings > Request History**.
+
+### Saved Responses
+
+Save any response as a named snapshot for future reference.
+
+- After receiving a response, click **Save Response** in the response panel and give it a name.
+- Saved responses appear as nested items under their parent request in the sidebar (expand the request with the ▶ toggle to see them).
+- Clicking a saved response loads both the original request and the saved response into the panels in read-only mode.
+- Saved responses can be renamed (✏️) or deleted (🗑️) from the sidebar.
+- Snapshots are stored in `{workspace}/saved-responses/` and are committed to git.
+
+### Collection Folders
+
+Folders group related requests inside a collection.
+
+- Folders are created automatically when importing an OpenAPI spec (one folder per tag).
+- Click a folder header to expand or collapse it.
+- Rename a folder with ✏️ or delete it with 🗑️. Deleting a folder warns you how many requests it contains.
+- Requests inside folders support the same rename, delete, and saved-response features as top-level requests.
 
 ### Certificate Management
 
@@ -125,7 +172,7 @@ Handle HTTPS certificate warnings and internal APIs with custom CA certificates.
 
 #### How to Add Certificates
 
-1. **Open Certificate Manager**: Click "🔒 Manage Certificates" in the sidebar
+1. **Open Certificate Manager**: Click "🔒 Certificates" in the top menu bar
 2. **Add Certificate**: Click "+ Add Certificate"
 3. **Fill Details**:
    - **Name**: Descriptive name (e.g., "Company Internal CA")
@@ -188,7 +235,7 @@ npm run dist         # Create distributable packages
 🚧 **Planned Features:**
 - Collection runner (batch/sequential request execution)
 - File upload support in form-data bodies
-- Collection export
+- Collection export (Postman v2, OpenAPI)
 - Plugin system
 
 ## Contributing
