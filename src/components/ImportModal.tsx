@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { Collection, Environment, ApiRequest } from '../types';
 import { importPostmanCollection, importPostmanEnvironment } from '../utils/postmanImporter';
 import { parseCurl } from '../utils/curlParser';
+import { importOpenApi } from '../utils/openApiImporter';
 
-export type ImportTab = 'collection' | 'environment' | 'curl';
+export type ImportTab = 'collection' | 'environment' | 'curl' | 'openapi';
 
 interface ImportModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface ImportModalProps {
   onImportCollection: (collection: Collection, collectionVariables?: Environment) => void;
   onImportEnvironment: (environment: Environment) => void;
   onImportCurl: (request: ApiRequest, collectionId: string | null, newCollectionName?: string) => void;
+  onImportOpenApi: (collection: Collection, targetCollectionId: string | null, newCollectionName?: string) => void;
 }
 
 export const ImportModal: React.FC<ImportModalProps> = ({
@@ -23,28 +25,35 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   onImportCollection,
   onImportEnvironment,
   onImportCurl,
+  onImportOpenApi,
 }) => {
   const [activeTab, setActiveTab] = useState<ImportTab>(initialTab);
   const [jsonInput, setJsonInput] = useState('');
   const [curlInput, setCurlInput] = useState('');
+  const [openApiInput, setOpenApiInput] = useState('');
   const [preview, setPreview] = useState<any>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [parseError, setParseError] = useState('');
   const [curlRequestName, setCurlRequestName] = useState('');
   const [curlTargetCollection, setCurlTargetCollection] = useState('__new__');
   const [curlNewCollectionName, setCurlNewCollectionName] = useState('');
+  const [openApiTargetCollection, setOpenApiTargetCollection] = useState('__new__');
+  const [openApiNewCollectionName, setOpenApiNewCollectionName] = useState('');
 
   // Reset when tab changes
   const switchTab = (tab: ImportTab) => {
     setActiveTab(tab);
     setJsonInput('');
     setCurlInput('');
+    setOpenApiInput('');
     setPreview(null);
     setErrors([]);
     setParseError('');
     setCurlRequestName('');
     setCurlTargetCollection('__new__');
     setCurlNewCollectionName('');
+    setOpenApiTargetCollection('__new__');
+    setOpenApiNewCollectionName('');
   };
 
   // Reset when modal opens with a new tab
@@ -122,6 +131,23 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     }
   };
 
+  const parseOpenApiInput = (input: string) => {
+    setParseError('');
+    setPreview(null);
+    setErrors([]);
+
+    if (!input.trim()) return;
+
+    try {
+      const result = importOpenApi(input);
+      setPreview(result);
+      setErrors(result.errors);
+      setOpenApiNewCollectionName(result.title);
+    } catch (e: any) {
+      setParseError(e.message);
+    }
+  };
+
   const handleImport = () => {
     if (!preview) return;
 
@@ -136,6 +162,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       const targetId = curlTargetCollection === '__new__' ? null : curlTargetCollection;
       onImportCurl(request, targetId, curlNewCollectionName);
       onClose();
+    } else if (activeTab === 'openapi') {
+      const importedCollection = { ...preview.collection, id: Date.now().toString() };
+      const name = openApiTargetCollection === '__new__'
+        ? (openApiNewCollectionName || preview.title)
+        : undefined;
+      onImportOpenApi(
+        importedCollection,
+        openApiTargetCollection === '__new__' ? null : openApiTargetCollection,
+        name,
+      );
+      onClose();
     }
   };
 
@@ -149,6 +186,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     fontSize: '0.9rem',
     fontWeight: activeTab === tab ? 'bold' : 'normal',
   });
+
+  const totalRequestCount = (preview?.collection)
+    ? preview.collection.requests.length +
+      (preview.collection.folders || []).reduce((sum: number, f: any) => sum + f.requests.length, 0)
+    : 0;
 
   return (
     <div style={{
@@ -201,6 +243,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           </button>
           <button style={tabStyle('curl')} onClick={() => switchTab('curl')}>
             Curl Command
+          </button>
+          <button style={tabStyle('openapi')} onClick={() => switchTab('openapi')}>
+            OpenAPI / Swagger
           </button>
         </div>
 
@@ -433,6 +478,105 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                       className="form-input"
                       value={curlNewCollectionName}
                       onChange={(e) => setCurlNewCollectionName(e.target.value)}
+                      style={{ width: '100%', fontSize: '0.85rem' }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* OpenAPI / Swagger Tab */}
+        {activeTab === 'openapi' && (
+          <div>
+            <p style={{ color: '#888', fontSize: '0.85rem', marginTop: 0 }}>
+              Paste OpenAPI 3.x or Swagger 2.0 JSON/YAML. Supports path params, examples, and security schemes.
+            </p>
+
+            <textarea
+              className="form-textarea"
+              style={{ minHeight: '150px', fontFamily: "'Monaco', 'Menlo', monospace", fontSize: '0.8rem' }}
+              placeholder="Paste OpenAPI / Swagger JSON or YAML here..."
+              value={openApiInput}
+              onChange={(e) => {
+                setOpenApiInput(e.target.value);
+                parseOpenApiInput(e.target.value);
+              }}
+            />
+
+            {/* Preview */}
+            {preview && (
+              <div style={{
+                marginTop: '1rem',
+                padding: '1rem',
+                backgroundColor: '#1a2d2d',
+                border: '1px solid #0d7377',
+                borderRadius: '4px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.9rem', color: '#ffffff', fontWeight: 'bold' }}>
+                    {preview.title}
+                  </span>
+                  <span style={{
+                    padding: '0.1rem 0.4rem',
+                    borderRadius: '3px',
+                    fontSize: '0.7rem',
+                    backgroundColor: '#0d4747',
+                    color: '#4dd',
+                    border: '1px solid #0d7377',
+                  }}>
+                    v{preview.version}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#888' }}>
+                  {totalRequestCount} request{totalRequestCount !== 1 ? 's' : ''}
+                  {(preview.collection.folders || []).length > 0 && (
+                    <span> in {(preview.collection.folders || []).length} folder{(preview.collection.folders || []).length !== 1 ? 's' : ''}</span>
+                  )}
+                  {preview.collection.requests.length > 0 && (preview.collection.folders || []).length > 0 && (
+                    <span> + {preview.collection.requests.length} untagged</span>
+                  )}
+                </div>
+                {(preview.collection.folders || []).length > 0 && (
+                  <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#aaa' }}>
+                    {(preview.collection.folders as any[]).map((f: any, i: number) => (
+                      <span key={i} style={{ marginRight: '0.5rem', color: '#888' }}>
+                        ▸ {f.name} ({f.requests.length})
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Target collection */}
+                <div style={{ marginTop: '1rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
+                    Import into
+                  </label>
+                  <select
+                    className="form-input"
+                    value={openApiTargetCollection}
+                    onChange={(e) => setOpenApiTargetCollection(e.target.value)}
+                    style={{ width: '100%', fontSize: '0.85rem' }}
+                  >
+                    {collections.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                    <option value="__new__">+ New collection</option>
+                  </select>
+                </div>
+
+                {/* New collection name */}
+                {openApiTargetCollection === '__new__' && (
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
+                      New collection name
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={openApiNewCollectionName}
+                      onChange={(e) => setOpenApiNewCollectionName(e.target.value)}
                       style={{ width: '100%', fontSize: '0.85rem' }}
                     />
                   </div>

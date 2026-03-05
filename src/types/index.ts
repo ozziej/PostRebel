@@ -26,10 +26,17 @@ export interface ApiRequest {
   testScript?: string;
 }
 
+export interface CollectionFolder {
+  id: string;
+  name: string;
+  requests: ApiRequest[];
+}
+
 export interface Collection {
   id: string;
   name: string;
   requests: ApiRequest[];
+  folders?: CollectionFolder[];
 }
 
 export interface EnvironmentVariable {

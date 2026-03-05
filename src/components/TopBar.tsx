@@ -11,6 +11,7 @@ interface TopBarProps {
   onOpenWorkspaceManager: () => void;
   onOpenEnvironmentManager: () => void;
   onOpenCertManager: () => void;
+  onOpenImport: () => void;
   onOpenSettings: () => void;
 }
 
@@ -24,6 +25,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenWorkspaceManager,
   onOpenEnvironmentManager,
   onOpenCertManager,
+  onOpenImport,
   onOpenSettings
 }) => {
   return (
@@ -159,6 +161,18 @@ export const TopBar: React.FC<TopBarProps> = ({
         display: 'flex',
         gap: '0.5rem'
       }}>
+        <button
+          onClick={onOpenImport}
+          className="button-secondary button"
+          style={{
+            padding: '0.5rem 0.75rem',
+            fontSize: '0.9rem',
+            whiteSpace: 'nowrap'
+          }}
+          title="Import collection, environment, cURL or OpenAPI"
+        >
+          ⬆️ Import
+        </button>
         <button
           onClick={onOpenCertManager}
           className="button-secondary button"

@@ -196,7 +196,11 @@ function App() {
       if (collection.id === collectionId) {
         return {
           ...collection,
-          requests: collection.requests.filter(r => r.id !== requestId)
+          requests: collection.requests.filter(r => r.id !== requestId),
+          folders: collection.folders?.map(f => ({
+            ...f,
+            requests: f.requests.filter(r => r.id !== requestId),
+          })),
         };
       }
       return collection;
@@ -207,7 +211,11 @@ function App() {
     if (collection) {
       const updatedCollection = {
         ...collection,
-        requests: collection.requests.filter(r => r.id !== requestId)
+        requests: collection.requests.filter(r => r.id !== requestId),
+        folders: collection.folders?.map(f => ({
+          ...f,
+          requests: f.requests.filter(r => r.id !== requestId),
+        })),
       };
       await saveCollection(updatedCollection);
     }
@@ -248,9 +256,10 @@ function App() {
     // Update the active request state
     setActiveRequest(updatedRequest);
 
-    // Find the collection containing this request and auto-save
+    // Find the collection containing this request (top-level or inside a folder)
     const collection = collections.find(c =>
-      c.requests.some(r => r.id === updatedRequest.id)
+      c.requests.some(r => r.id === updatedRequest.id) ||
+      c.folders?.some(f => f.requests.some(r => r.id === updatedRequest.id))
     );
 
     if (collection) {
@@ -258,7 +267,13 @@ function App() {
         ...collection,
         requests: collection.requests.map(r =>
           r.id === updatedRequest.id ? updatedRequest : r
-        )
+        ),
+        folders: collection.folders?.map(f => ({
+          ...f,
+          requests: f.requests.map(r =>
+            r.id === updatedRequest.id ? updatedRequest : r
+          ),
+        })),
       };
       await saveCollection(updatedCollection);
       console.log('[App] Auto-saved request:', updatedRequest.name);
@@ -422,6 +437,32 @@ function App() {
     }
     handleSelectRequest(request);
     console.log('[App] Imported curl request:', request.name);
+  };
+
+  const handleImportOpenApi = async (
+    importedCollection: Collection,
+    targetCollectionId: string | null,
+    newCollectionName?: string,
+  ) => {
+    if (targetCollectionId) {
+      const target = collections.find(c => c.id === targetCollectionId);
+      if (target) {
+        const merged: Collection = {
+          ...target,
+          requests: [...target.requests, ...importedCollection.requests],
+          folders: [...(target.folders || []), ...(importedCollection.folders || [])],
+        };
+        await saveCollection(merged);
+      }
+    } else {
+      const newCollection: Collection = {
+        ...importedCollection,
+        id: Date.now().toString(),
+        name: newCollectionName || importedCollection.name,
+      };
+      await saveCollection(newCollection);
+    }
+    console.log('[App] Imported OpenAPI collection:', importedCollection.name);
   };
 
   const handleSelectRequest = (request: ApiRequest) => {
@@ -589,6 +630,7 @@ function App() {
         onOpenWorkspaceManager={() => setShowWorkspaceManager(true)}
         onOpenEnvironmentManager={() => setShowEnvManager(true)}
         onOpenCertManager={() => setShowCertManager(true)}
+        onOpenImport={() => openImportModal('collection')}
         onOpenSettings={() => setShowSettings(true)}
       />
 
@@ -606,7 +648,6 @@ function App() {
             onSaveCollection={saveCollection}
             onDeleteCollection={deleteCollection}
             onDeleteRequest={deleteRequest}
-            onOpenImport={() => openImportModal('collection')}
           />
         </ResizableSidebar>
 
@@ -682,6 +723,7 @@ function App() {
         onImportCollection={handleImportCollection}
         onImportEnvironment={handleImportEnvironment}
         onImportCurl={handleImportCurl}
+        onImportOpenApi={handleImportOpenApi}
       />
     </div>
   );
