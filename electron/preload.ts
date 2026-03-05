@@ -43,6 +43,12 @@ export interface ElectronAPI {
   loadHistory: (workspaceId: string) => Promise<any>;
   saveHistoryEntry: (workspaceId: string, entry: any) => Promise<any>;
   truncateHistory: (workspaceId: string, maxPerRequest: number) => Promise<any>;
+
+  // Saved Responses
+  loadSavedResponses: (workspaceId: string) => Promise<any>;
+  saveSavedResponse: (workspaceId: string, entry: any) => Promise<any>;
+  deleteSavedResponse: (workspaceId: string, entryId: string) => Promise<any>;
+  renameSavedResponse: (workspaceId: string, entryId: string, newName: string) => Promise<any>;
 }
 
 const api: ElectronAPI = {
@@ -88,6 +94,12 @@ const api: ElectronAPI = {
   loadHistory: (workspaceId) => ipcRenderer.invoke('load-history', workspaceId),
   saveHistoryEntry: (workspaceId, entry) => ipcRenderer.invoke('save-history-entry', workspaceId, entry),
   truncateHistory: (workspaceId, maxPerRequest) => ipcRenderer.invoke('truncate-history', workspaceId, maxPerRequest),
+
+  // Saved Responses
+  loadSavedResponses: (workspaceId) => ipcRenderer.invoke('load-saved-responses', workspaceId),
+  saveSavedResponse: (workspaceId, entry) => ipcRenderer.invoke('save-saved-response', workspaceId, entry),
+  deleteSavedResponse: (workspaceId, entryId) => ipcRenderer.invoke('delete-saved-response', workspaceId, entryId),
+  renameSavedResponse: (workspaceId, entryId, newName) => ipcRenderer.invoke('rename-saved-response', workspaceId, entryId, newName),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

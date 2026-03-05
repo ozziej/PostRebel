@@ -194,6 +194,7 @@ ipcMain.handle('create-workspace', async (event, name, description) => {
 *.local.json
 .DS_Store
 node_modules/
+saved-responses/
     `.trim();
     await fs.writeFile(gitignorePath, gitignoreContent);
 
@@ -854,6 +855,79 @@ ipcMain.handle('truncate-history', async (event, workspaceId, maxPerRequest) => 
 
     truncated.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     await fs.writeFile(historyPath, JSON.stringify(truncated, null, 2));
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+// Saved Responses management
+ipcMain.handle('load-saved-responses', async (event, workspaceId) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const filePath = path.join(workspacePath, 'saved-responses', 'saved-responses.json');
+    const content = await fs.readFile(filePath, 'utf-8');
+    return { success: true, entries: JSON.parse(content) };
+  } catch {
+    return { success: true, entries: [] };
+  }
+});
+
+ipcMain.handle('save-saved-response', async (event, workspaceId, entry) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const dir = path.join(workspacePath, 'saved-responses');
+    await fs.mkdir(dir, { recursive: true });
+
+    // Ensure saved-responses/ is in the workspace .gitignore
+    const gitignorePath = path.join(workspacePath, '.gitignore');
+    try {
+      const gitignore = await fs.readFile(gitignorePath, 'utf-8');
+      if (!gitignore.includes('saved-responses/')) {
+        await fs.writeFile(gitignorePath, gitignore.trimEnd() + '\nsaved-responses/\n');
+      }
+    } catch {
+      await fs.writeFile(gitignorePath, 'saved-responses/\n');
+    }
+
+    const filePath = path.join(dir, 'saved-responses.json');
+    let entries: any[] = [];
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      entries = JSON.parse(content);
+    } catch {
+      // File doesn't exist yet
+    }
+    entries.push(entry);
+    await fs.writeFile(filePath, JSON.stringify(entries, null, 2));
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('delete-saved-response', async (event, workspaceId, entryId) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const filePath = path.join(workspacePath, 'saved-responses', 'saved-responses.json');
+    const content = await fs.readFile(filePath, 'utf-8');
+    const entries: any[] = JSON.parse(content);
+    const filtered = entries.filter((e: any) => e.id !== entryId);
+    await fs.writeFile(filePath, JSON.stringify(filtered, null, 2));
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('rename-saved-response', async (event, workspaceId, entryId, newName) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const filePath = path.join(workspacePath, 'saved-responses', 'saved-responses.json');
+    const content = await fs.readFile(filePath, 'utf-8');
+    const entries: any[] = JSON.parse(content);
+    const updated = entries.map((e: any) => e.id === entryId ? { ...e, name: newName } : e);
+    await fs.writeFile(filePath, JSON.stringify(updated, null, 2));
     return { success: true };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };

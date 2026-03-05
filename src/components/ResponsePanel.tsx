@@ -1,18 +1,29 @@
-import React, { useState } from 'react';
-import { ApiResponse } from '../types';
+import React, { useState, useEffect } from 'react';
+import { ApiResponse, SavedResponse } from '../types';
 
 interface ResponsePanelProps {
   response: ApiResponse | null;
   logs: string[];
   isLoading: boolean;
+  activeSavedResponse?: SavedResponse | null;
+  onSaveResponse?: (name: string) => void;
 }
 
 export const ResponsePanel: React.FC<ResponsePanelProps> = ({
   response,
   logs,
-  isLoading
+  isLoading,
+  activeSavedResponse,
+  onSaveResponse,
 }) => {
   const [activeTab, setActiveTab] = useState<'response' | 'headers' | 'console'>('response');
+  const [showSaveInput, setShowSaveInput] = useState(false);
+  const [saveInputName, setSaveInputName] = useState('');
+
+  useEffect(() => {
+    setShowSaveInput(false);
+    setSaveInputName('');
+  }, [response]);
 
   const formatJsonResponse = (data: any): string => {
     try {
@@ -67,15 +78,77 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
     );
   }
 
+  const handleSaveConfirm = () => {
+    if (!onSaveResponse || !saveInputName.trim()) return;
+    onSaveResponse(saveInputName.trim());
+    setSaveInputName('');
+    setShowSaveInput(false);
+  };
+
   return (
     <div className="response-panel">
+      {activeSavedResponse && (
+        <div style={{
+          background: '#1a2d2d',
+          borderBottom: '1px solid #0d7377',
+          padding: '0.4rem 1rem',
+          fontSize: '0.78rem',
+          color: '#0d9e9e',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+        }}>
+          <span>📌</span>
+          <span>Viewing saved response: <strong>{activeSavedResponse.name}</strong> — select a request to return to live mode</span>
+        </div>
+      )}
       <div className="response-header">
-        <div className="response-stats">
+        <div className="response-stats" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <span className={`status-badge ${getStatusClass(response.status)}`}>
             {response.status === 0 ? '✗ ' : ''}{response.status > 0 ? response.status + ' ' : ''}{response.statusText}
           </span>
           {response.time > 0 && <span>{response.time}ms</span>}
           {response.size > 0 && <span>{response.size} bytes</span>}
+          {onSaveResponse && !activeSavedResponse && (
+            showSaveInput ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: 'auto' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Response name..."
+                  value={saveInputName}
+                  onChange={(e) => setSaveInputName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveConfirm();
+                    if (e.key === 'Escape') { setShowSaveInput(false); setSaveInputName(''); }
+                  }}
+                  style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem', width: '160px' }}
+                  autoFocus
+                />
+                <button
+                  onClick={handleSaveConfirm}
+                  className="button"
+                  style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem' }}
+                  title="Confirm save"
+                >✓</button>
+                <button
+                  onClick={() => { setShowSaveInput(false); setSaveInputName(''); }}
+                  className="button-secondary button"
+                  style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem' }}
+                  title="Cancel"
+                >✗</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowSaveInput(true)}
+                className="button-secondary button"
+                style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', marginLeft: 'auto' }}
+                title="Save this response"
+              >
+                💾 Save
+              </button>
+            )
+          )}
         </div>
 
         <div className="request-tabs" style={{ marginTop: '1rem' }}>

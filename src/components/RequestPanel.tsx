@@ -40,6 +40,7 @@ interface RequestPanelProps {
   onUpdateVariable?: (varName: string, newValue: string) => void;
   isLoading: boolean;
   requestHistory?: RequestHistoryEntry[];
+  isReadOnly?: boolean;
 }
 
 export const RequestPanel: React.FC<RequestPanelProps> = ({
@@ -49,7 +50,8 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   onRequestChange,
   onUpdateVariable,
   isLoading,
-  requestHistory = []
+  requestHistory = [],
+  isReadOnly = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'headers' | 'body' | 'auth' | 'scripts'>('headers');
   const [localRequest, setLocalRequest] = useState<ApiRequest | null>(null);
@@ -105,7 +107,9 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   const updateRequest = (updates: Partial<ApiRequest>) => {
     const updatedRequest = { ...localRequest, ...updates };
     setLocalRequest(updatedRequest);
-    onRequestChange(updatedRequest);
+    if (!isReadOnly) {
+      onRequestChange(updatedRequest);
+    }
   };
 
   const updateHeader = (key: string, value: string) => {
@@ -125,6 +129,17 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
 
   return (
     <div className="request-panel">
+      {isReadOnly && (
+        <div style={{
+          background: '#1a2d2d',
+          borderBottom: '1px solid #0d7377',
+          padding: '0.4rem 1rem',
+          fontSize: '0.78rem',
+          color: '#0d9e9e',
+        }}>
+          📌 Viewing saved request snapshot — changes will not be saved
+        </div>
+      )}
       <div className="url-bar">
         <select
           className="method-select"

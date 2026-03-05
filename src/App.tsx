@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace, RequestHistoryEntry } from './types';
+import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace, RequestHistoryEntry, SavedResponse } from './types';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { ResizableSidebar } from './components/ResizableSidebar';
@@ -24,6 +24,7 @@ function App() {
   const [activeEnvironment, setActiveEnvironment] = useState<Environment | null>(null);
   const [activeRequest, setActiveRequest] = useState<ApiRequest | null>(null);
   const [currentResponse, setCurrentResponse] = useState<ApiResponse | null>(null);
+  const [responseCache, setResponseCache] = useState<Record<string, ApiResponse>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [showCertManager, setShowCertManager] = useState(false);
@@ -35,6 +36,8 @@ function App() {
   const [importModalTab, setImportModalTab] = useState<ImportTab>('collection');
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [requestHistory, setRequestHistory] = useState<RequestHistoryEntry[]>([]);
+  const [savedResponses, setSavedResponses] = useState<SavedResponse[]>([]);
+  const [activeSavedResponse, setActiveSavedResponse] = useState<SavedResponse | null>(null);
   const savedPrefsRef = useRef<{ activeWorkspaceId?: string; activeEnvironmentId?: string }>({});
 
   useEffect(() => {
@@ -119,6 +122,16 @@ function App() {
           setRequestHistory(historyResult.entries);
         } else {
           setRequestHistory([]);
+        }
+      }
+
+      // Load saved responses
+      if (activeWorkspace) {
+        const savedResult = await window.electronAPI.loadSavedResponses(activeWorkspace.id);
+        if (savedResult.success && savedResult.entries) {
+          setSavedResponses(savedResult.entries);
+        } else {
+          setSavedResponses([]);
         }
       }
     } catch (error) {
@@ -302,7 +315,10 @@ function App() {
     setActiveEnvironment(null);
     setActiveRequest(null);
     setCurrentResponse(null);
+    setResponseCache({});
     setRequestHistory([]);
+    setSavedResponses([]);
+    setActiveSavedResponse(null);
   };
 
   const handleCreateEnvironment = async (name: string) => {
@@ -404,8 +420,52 @@ function App() {
       };
       await saveCollection(newCollection);
     }
-    setActiveRequest(request);
+    handleSelectRequest(request);
     console.log('[App] Imported curl request:', request.name);
+  };
+
+  const handleSelectRequest = (request: ApiRequest) => {
+    setActiveSavedResponse(null);
+    setActiveRequest(request);
+    setCurrentResponse(responseCache[request.id] ?? null);
+  };
+
+  const handleSelectSavedResponse = (saved: SavedResponse) => {
+    setActiveSavedResponse(saved);
+    setActiveRequest(saved.request);
+    setCurrentResponse(saved.response);
+  };
+
+  const handleSaveSavedResponse = async (name: string) => {
+    if (!activeWorkspace || !activeRequest || !currentResponse) return;
+    const entry: SavedResponse = {
+      id: Date.now().toString(),
+      name,
+      requestId: activeRequest.id,
+      timestamp: new Date().toISOString(),
+      request: activeRequest,
+      response: currentResponse,
+    };
+    await window.electronAPI.saveSavedResponse(activeWorkspace.id, entry);
+    setSavedResponses(prev => [...prev, entry]);
+  };
+
+  const handleDeleteSavedResponse = async (entryId: string) => {
+    if (!activeWorkspace) return;
+    await window.electronAPI.deleteSavedResponse(activeWorkspace.id, entryId);
+    setSavedResponses(prev => prev.filter(e => e.id !== entryId));
+    if (activeSavedResponse?.id === entryId) {
+      setActiveSavedResponse(null);
+    }
+  };
+
+  const handleRenameSavedResponse = async (entryId: string, newName: string) => {
+    if (!activeWorkspace) return;
+    await window.electronAPI.renameSavedResponse(activeWorkspace.id, entryId, newName);
+    setSavedResponses(prev => prev.map(e => e.id === entryId ? { ...e, name: newName } : e));
+    if (activeSavedResponse?.id === entryId) {
+      setActiveSavedResponse(prev => prev ? { ...prev, name: newName } : null);
+    }
   };
 
   const executeRequest = async (request: ApiRequest) => {
@@ -435,6 +495,7 @@ function App() {
       // Make the HTTP request
       const response = await HttpService.executeRequest(request, activeEnvironment, certificates);
       setCurrentResponse(response);
+      setResponseCache(prev => ({ ...prev, [request.id]: response }));
 
       // Log history entry
       if (activeWorkspace) {
@@ -477,7 +538,7 @@ function App() {
       setLogs(prev => [...prev, `Fatal Error: ${error.message}`]);
 
       // Show error in response panel
-      setCurrentResponse({
+      const errorResponse: ApiResponse = {
         status: 0,
         statusText: 'Fatal Error',
         headers: {},
@@ -488,7 +549,9 @@ function App() {
         },
         time: 0,
         size: 0
-      });
+      };
+      setCurrentResponse(errorResponse);
+      setResponseCache(prev => ({ ...prev, [request.id]: errorResponse }));
 
       // Log error to history
       if (activeWorkspace && activeEnvironment) {
@@ -534,7 +597,12 @@ function App() {
           <Sidebar
             activeWorkspace={activeWorkspace}
             collections={collections}
-            onSelectRequest={setActiveRequest}
+            savedResponses={savedResponses}
+            activeSavedResponse={activeSavedResponse}
+            onSelectRequest={handleSelectRequest}
+            onSelectSavedResponse={handleSelectSavedResponse}
+            onDeleteSavedResponse={handleDeleteSavedResponse}
+            onRenameSavedResponse={handleRenameSavedResponse}
             onSaveCollection={saveCollection}
             onDeleteCollection={deleteCollection}
             onDeleteRequest={deleteRequest}
@@ -551,12 +619,15 @@ function App() {
           onUpdateVariable={handleUpdateVariable}
           isLoading={isLoading}
           requestHistory={requestHistory}
+          isReadOnly={activeSavedResponse !== null}
         />
 
         <ResponsePanel
           response={currentResponse}
           logs={logs}
           isLoading={isLoading}
+          activeSavedResponse={activeSavedResponse}
+          onSaveResponse={handleSaveSavedResponse}
         />
         </div>
       </div>

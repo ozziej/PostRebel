@@ -62,6 +62,15 @@ export interface Certificate {
   type: 'ca' | 'client'; // CA certificate or client certificate
 }
 
+export interface SavedResponse {
+  id: string;
+  name: string;
+  requestId: string;
+  timestamp: string;
+  request: ApiRequest;
+  response: ApiResponse;
+}
+
 export interface RequestHistoryEntry {
   id: string;
   requestId: string;
@@ -139,6 +148,12 @@ declare global {
       loadHistory: (workspaceId: string) => Promise<{ success: boolean; entries?: RequestHistoryEntry[]; error?: string }>;
       saveHistoryEntry: (workspaceId: string, entry: RequestHistoryEntry) => Promise<{ success: boolean; error?: string }>;
       truncateHistory: (workspaceId: string, maxPerRequest: number) => Promise<{ success: boolean; error?: string }>;
+
+      // Saved Responses
+      loadSavedResponses: (workspaceId: string) => Promise<{ success: boolean; entries?: SavedResponse[]; error?: string }>;
+      saveSavedResponse: (workspaceId: string, entry: SavedResponse) => Promise<{ success: boolean; error?: string }>;
+      deleteSavedResponse: (workspaceId: string, entryId: string) => Promise<{ success: boolean; error?: string }>;
+      renameSavedResponse: (workspaceId: string, entryId: string, newName: string) => Promise<{ success: boolean; error?: string }>;
     };
   }
 }

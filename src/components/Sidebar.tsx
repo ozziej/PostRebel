@@ -1,10 +1,15 @@
 import React, { useState } from 'react';
-import { Collection, Environment, ApiRequest, Workspace } from '../types';
+import { Collection, Environment, ApiRequest, Workspace, SavedResponse } from '../types';
 
 interface SidebarProps {
   activeWorkspace: Workspace | null;
   collections: Collection[];
+  savedResponses: SavedResponse[];
+  activeSavedResponse: SavedResponse | null;
   onSelectRequest: (request: ApiRequest) => void;
+  onSelectSavedResponse: (saved: SavedResponse) => void;
+  onDeleteSavedResponse: (id: string) => void;
+  onRenameSavedResponse: (id: string, newName: string) => void;
   onSaveCollection: (collection: Collection) => Promise<any>;
   onDeleteCollection: (collectionId: string) => Promise<any>;
   onDeleteRequest: (collectionId: string, requestId: string) => Promise<any>;
@@ -14,17 +19,24 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   activeWorkspace,
   collections,
+  savedResponses,
+  activeSavedResponse,
   onSelectRequest,
+  onSelectSavedResponse,
+  onDeleteSavedResponse,
+  onRenameSavedResponse,
   onSaveCollection,
   onDeleteCollection,
   onDeleteRequest,
   onOpenImport
 }) => {
   const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
+  const [expandedRequests, setExpandedRequests] = useState<Set<string>>(new Set());
   const [showNewCollection, setShowNewCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [editingCollection, setEditingCollection] = useState<string | null>(null);
   const [editingRequest, setEditingRequest] = useState<string | null>(null);
+  const [editingSavedResponse, setEditingSavedResponse] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
   const toggleCollection = (collectionId: string) => {
@@ -115,6 +127,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const cancelEdit = () => {
     setEditingCollection(null);
     setEditingRequest(null);
+    setEditingSavedResponse(null);
+    setEditName('');
+  };
+
+  const toggleRequest = (requestId: string) => {
+    const expanded = new Set(expandedRequests);
+    if (expanded.has(requestId)) {
+      expanded.delete(requestId);
+    } else {
+      expanded.add(requestId);
+    }
+    setExpandedRequests(expanded);
+  };
+
+  const saveSavedResponseName = (id: string) => {
+    if (!editName.trim()) return;
+    onRenameSavedResponse(id, editName.trim());
+    setEditingSavedResponse(null);
     setEditName('');
   };
 
@@ -327,86 +357,149 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {expandedCollections.has(collection.id) && (
               <div>
-                {collection.requests.map(request => (
-                  <div
-                    key={request.id}
-                    className="request-item"
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', cursor: 'pointer' }}
-                    onClick={() => { if (editingRequest !== request.id) onSelectRequest(request); }}
-                  >
-                    {editingRequest === request.id ? (
-                      <>
-                        <span className={`http-method ${request.method}`} style={{ marginRight: '0.5rem' }}>
-                          {request.method}
-                        </span>
-                        <input
-                          type="text"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          className="form-input"
-                          style={{ fontSize: '0.9rem', flex: 1, marginRight: '0.5rem' }}
-                          onKeyPress={(e) => e.key === 'Enter' && saveRequestName(collection, request)}
-                          onBlur={() => saveRequestName(collection, request)}
-                          onClick={(e) => e.stopPropagation()}
-                          autoFocus
-                        />
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            saveRequestName(collection, request);
-                          }}
-                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                          className="button"
-                        >
-                          ✓
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            cancelEdit();
-                          }}
-                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }}
-                          className="button-secondary button"
-                        >
-                          ✗
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div
-                          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0, overflow: 'hidden' }}
-                        >
-                          <span className={`http-method ${request.method}`}>
-                            {request.method}
-                          </span>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{request.name}</span>
+                {collection.requests.map(request => {
+                  const reqSavedResponses = savedResponses.filter(s => s.requestId === request.id);
+                  const isExpanded = expandedRequests.has(request.id);
+                  return (
+                    <div key={request.id}>
+                      <div
+                        className="request-item"
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', cursor: 'pointer' }}
+                        onClick={() => { if (editingRequest !== request.id) onSelectRequest(request); }}
+                      >
+                        {editingRequest === request.id ? (
+                          <>
+                            <span className={`http-method ${request.method}`} style={{ marginRight: '0.5rem' }}>
+                              {request.method}
+                            </span>
+                            <input
+                              type="text"
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              className="form-input"
+                              style={{ fontSize: '0.9rem', flex: 1, marginRight: '0.5rem' }}
+                              onKeyPress={(e) => e.key === 'Enter' && saveRequestName(collection, request)}
+                              onBlur={() => saveRequestName(collection, request)}
+                              onClick={(e) => e.stopPropagation()}
+                              autoFocus
+                            />
+                            <button
+                              onClick={(e) => { e.stopPropagation(); saveRequestName(collection, request); }}
+                              style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                              className="button"
+                            >✓</button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); cancelEdit(); }}
+                              style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }}
+                              className="button-secondary button"
+                            >✗</button>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                              {reqSavedResponses.length > 0 && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); toggleRequest(request.id); }}
+                                  style={{ background: 'none', border: 'none', color: '#888', padding: '0', cursor: 'pointer', fontSize: '0.6rem', flexShrink: 0 }}
+                                  title="Toggle saved responses"
+                                >
+                                  {isExpanded ? '▼' : '▶'}
+                                </button>
+                              )}
+                              <span className={`http-method ${request.method}`}>{request.method}</span>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{request.name}</span>
+                            </div>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); startEditingRequest(request); }}
+                              style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginRight: '0.25rem' }}
+                              className="button-secondary button"
+                              title="Rename request"
+                            >✏️</button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deleteRequest(collection, request.id, request.name); }}
+                              style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                              className="button-secondary button"
+                              title="Delete request"
+                            >🗑️</button>
+                          </>
+                        )}
+                      </div>
+
+                      {isExpanded && reqSavedResponses.length > 0 && (
+                        <div style={{ paddingLeft: '1.5rem' }}>
+                          {reqSavedResponses.map(saved => (
+                            <div
+                              key={saved.id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '0.3rem 0.5rem',
+                                cursor: 'pointer',
+                                borderLeft: `2px solid #0d7377`,
+                                marginBottom: '2px',
+                                borderRadius: '0 4px 4px 0',
+                                backgroundColor: activeSavedResponse?.id === saved.id ? '#0d737720' : 'transparent',
+                              }}
+                              onClick={() => { if (editingSavedResponse !== saved.id) onSelectSavedResponse(saved); }}
+                            >
+                              {editingSavedResponse === saved.id ? (
+                                <>
+                                  <input
+                                    type="text"
+                                    value={editName}
+                                    onChange={(e) => setEditName(e.target.value)}
+                                    className="form-input"
+                                    style={{ fontSize: '0.8rem', flex: 1, marginRight: '0.5rem' }}
+                                    onKeyPress={(e) => e.key === 'Enter' && saveSavedResponseName(saved.id)}
+                                    onBlur={() => saveSavedResponseName(saved.id)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    autoFocus
+                                  />
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); saveSavedResponseName(saved.id); }}
+                                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                                    className="button"
+                                  >✓</button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); cancelEdit(); }}
+                                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }}
+                                    className="button-secondary button"
+                                  >✗</button>
+                                </>
+                              ) : (
+                                <>
+                                  <span style={{
+                                    fontSize: '0.8rem',
+                                    color: activeSavedResponse?.id === saved.id ? '#0d9e9e' : '#aaa',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    flex: 1,
+                                  }}>
+                                    ↳ {saved.name}
+                                  </span>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setEditingSavedResponse(saved.id); setEditName(saved.name); }}
+                                    style={{ fontSize: '0.65rem', padding: '0.15rem 0.3rem', marginRight: '0.2rem', flexShrink: 0 }}
+                                    className="button-secondary button"
+                                    title="Rename saved response"
+                                  >✏️</button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); onDeleteSavedResponse(saved.id); }}
+                                    style={{ fontSize: '0.65rem', padding: '0.15rem 0.3rem', flexShrink: 0 }}
+                                    className="button-secondary button"
+                                    title="Delete saved response"
+                                  >🗑️</button>
+                                </>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startEditingRequest(request);
-                          }}
-                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginRight: '0.25rem' }}
-                          className="button-secondary button"
-                          title="Rename request"
-                        >
-                          ✏️
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteRequest(collection, request.id, request.name);
-                          }}
-                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                          className="button-secondary button"
-                          title="Delete request"
-                        >
-                          🗑️
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
