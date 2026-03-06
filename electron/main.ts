@@ -379,7 +379,8 @@ ipcMain.handle('delete-workspace', async (event, workspaceId) => {
 async function getWorkspacePath(workspaceId?: string): Promise<string> {
   if (!workspaceId) {
     // Backward compatibility: use old structure
-    return process.cwd();
+    // Use userData path so it works when launched from Applications
+    return app.getPath('userData');
   }
   const workspacesDir = await getWorkspacesBaseDir();
   return path.join(workspacesDir, workspaceId);
@@ -742,7 +743,7 @@ ipcMain.handle('git-status', async () => {
 // Certificate management
 ipcMain.handle('save-certificate', async (event, data) => {
   try {
-    const certsDir = path.join(process.cwd(), 'certificates');
+    const certsDir = path.join(app.getPath('userData'), 'certificates');
     await fs.mkdir(certsDir, { recursive: true });
 
     const filePath = path.join(certsDir, `${data.id}.json`);
@@ -756,7 +757,7 @@ ipcMain.handle('save-certificate', async (event, data) => {
 
 ipcMain.handle('load-certificates', async () => {
   try {
-    const certsDir = path.join(process.cwd(), 'certificates');
+    const certsDir = path.join(app.getPath('userData'), 'certificates');
     const files = await fs.readdir(certsDir);
     const certificates = [];
 
@@ -775,7 +776,7 @@ ipcMain.handle('load-certificates', async () => {
 
 ipcMain.handle('delete-certificate', async (event, id) => {
   try {
-    const certsDir = path.join(process.cwd(), 'certificates');
+    const certsDir = path.join(app.getPath('userData'), 'certificates');
     const filePath = path.join(certsDir, `${id}.json`);
     await fs.unlink(filePath);
 
