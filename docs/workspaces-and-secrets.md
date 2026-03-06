@@ -9,29 +9,28 @@ PostRebel now includes a complete workspace system with automatic secrets manage
 A **workspace** is a self-contained project with its own:
 - Collections (API requests)
 - Environments (variables)
-- Git repository
 - Secrets (kept separate from git)
 
-Each workspace is stored in its own folder: `./workspaces/{workspace-id}/`
+All workspaces live under a single workspaces root directory (e.g. `~/PostRebelWorkspaces/`) which has one shared git repository. Each workspace is stored in its own sub-folder: `./workspaces/{workspace-id}/`
 
 ## Workspace Structure
 
 ```
-/workspaces/
+/workspaces/                        # Workspaces root directory
+  .git/                             # Shared git repo (all workspaces)
+  .gitignore                        # Auto-managed (excludes *.secrets.json etc.)
   /my-api-project-123456789/
-    workspace.json              # Project metadata
-    .git/                       # Git repository
-    .gitignore                  # Auto-generated (excludes secrets)
+    workspace.json                  # Project metadata
     /environments/
-      development.json          # Public variables (COMMITTED)
-      development.secrets.json  # Secret variables (GITIGNORED)
+      development.json              # Public variables (COMMITTED)
+      development.secrets.json      # Secret variables (GITIGNORED)
       production.json
       production.secrets.json
     /collections/
-      api-tests.json            # Requests without secrets (COMMITTED)
-      api-tests.secrets.json    # Secret form parameters (GITIGNORED)
+      api-tests.json                # Requests without secrets (COMMITTED)
+      api-tests.secrets.json        # Secret form parameters (GITIGNORED)
     /history/
-      history.json              # Request execution history (LOCAL ONLY)
+      history.json                  # Request execution history (LOCAL ONLY)
 ```
 
 ## Creating a Workspace
@@ -45,8 +44,8 @@ Each workspace is stored in its own folder: `./workspaces/{workspace-id}/`
 
 The system will:
 - Create the folder structure
-- Initialize a git repository
-- Add a `.gitignore` to exclude secrets
+- Ensure a git repository exists at the workspaces root (creates one if none exists; skips if one is already present, e.g. from a clone)
+- Ensure the `.gitignore` at the workspaces root excludes `*.secrets.json` and other non-tracked files
 - Switch to the new workspace
 
 ## Switching Workspaces
@@ -118,31 +117,33 @@ When you load:
 ### Initial Setup
 
 ```bash
-cd workspaces/my-workspace-id/
+cd ~/PostRebelWorkspaces/   # or your configured workspaces directory
 git add .
 git commit -m "Initial commit"
 git remote add origin <your-repo-url>
 git push -u origin main
 ```
 
+Because all workspaces share one git repo, a single commit can include changes across multiple workspaces.
+
 ### What Gets Committed
 
 ✅ **Committed (safe to share)**:
-- `workspace.json` - Project metadata
-- `environments/*.json` - Variable names (not values marked as secret)
-- `collections/*.json` - Requests (without secret parameters)
+- `*/workspace.json` - Project metadata
+- `*/environments/*.json` - Variable names (not values marked as secret)
+- `*/collections/*.json` - Requests (without secret parameters)
 - `.gitignore` - Ensures secrets stay private
 
 ❌ **NOT Committed (stays local)**:
 - `*.secrets.json` - All secret values
 - `*.local.json` - Local overrides
+- `*/saved-responses/` - Saved response snapshots
 
 ### Team Collaboration
 
 **Person 1 (creates project):**
 ```bash
-# In workspace folder
-git init
+cd ~/PostRebelWorkspaces/
 git add .
 git commit -m "Add API collection"
 git push
@@ -150,11 +151,11 @@ git push
 
 **Person 2 (clones project):**
 ```bash
-git clone <repo-url> workspaces/my-workspace-id/
-cd workspaces/my-workspace-id/
+git clone <repo-url> ~/PostRebelWorkspaces/
+# Point PostRebel's workspaces directory to this folder in Settings
 # Edit environment variables
 # Mark secrets and add your own values
-# development.secrets.json is created locally (not committed)
+# *.secrets.json files are created locally (not committed)
 ```
 
 **Benefits:**
@@ -168,10 +169,12 @@ cd workspaces/my-workspace-id/
 The current implementation includes:
 - ✅ Workspace creation, editing, and deletion
 - ✅ Automatic secrets splitting/merging
-- ✅ Git initialization per workspace
+- ✅ Shared git repo at workspaces root (initialized on first workspace creation; existing repos are reused)
+- ✅ Auto-managed `.gitignore` at workspaces root
 - ✅ Visual indicators for secrets
 - ✅ Per-request execution history with configurable retention
 - ✅ Configurable workspaces storage directory
+- ✅ Drag and drop for reordering requests and folders
 - ✅ Backward compatible (works without workspaces)
 
 Note: If you have existing collections/environments in the old structure (root-level `collections/` and `environments/` folders), they will still work. Select "No Workspace" in the dropdown to access them.
@@ -316,7 +319,7 @@ Workspace 3: "Personal Projects"
 
 ## Security Notes
 
-- **.secrets.json files are NEVER committed** (enforced by .gitignore)
+- **.secrets.json files are NEVER committed** (enforced by the auto-managed `.gitignore` at the workspaces root)
 - **Mark all sensitive data as secret** before first commit
 - **Review git diff** before committing to verify no secrets
 - **Use different credentials per environment** (dev/staging/prod)

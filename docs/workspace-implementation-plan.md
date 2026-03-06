@@ -101,9 +101,10 @@ if (fs.existsSync('./collections') || fs.existsSync('./environments')) {
 ```
 
 ### 7. Git Integration
-- .gitignore already updated to exclude `*.secrets.json`
-- Each workspace can have its own `.git` folder
-- Git operations work within active workspace
+- A single shared git repo is initialized at the workspaces root directory (not per workspace)
+- If the directory already contains a repo (e.g. from a clone), it is reused
+- `.gitignore` at the workspaces root is auto-managed to always exclude `*.secrets.json`, `*.local.json`, `saved-responses/`, `.DS_Store`, and `node_modules/`
+- Git operations (add, commit, push) are run from the workspaces root to capture all workspaces in one repo
 
 ## User Flow
 

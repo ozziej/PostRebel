@@ -47,11 +47,11 @@ This will:
 
 ```
 PostRebel/
-├── workspaces/               # Workspace projects
+├── workspaces/               # Workspace projects (single git repo at this level)
+│   ├── .git/                       # Shared git repo for all workspaces
+│   ├── .gitignore                  # Auto-managed (excludes *.secrets.json etc.)
 │   └── my-project-123456/
 │       ├── workspace.json          # Project metadata
-│       ├── .git/                   # Per-workspace git repo
-│       ├── .gitignore              # Auto-generated (excludes secrets)
 │       ├── collections/            # API collections (committed)
 │       ├── environments/           # Environment configs (committed)
 │       │   ├── dev.json            # Public variables
@@ -157,10 +157,45 @@ Save any response as a named snapshot for future reference.
 
 Folders group related requests inside a collection.
 
-- Folders are created automatically when importing an OpenAPI spec (one folder per tag).
-- Click a folder header to expand or collapse it.
+- Create folders manually with the **+ Add Folder** button on a collection, or have them created automatically when importing an OpenAPI spec (one folder per tag).
+- Click a folder header to expand or collapse it (arrow tip-down = open, tip-right = closed).
 - Rename a folder with ✏️ or delete it with 🗑️. Deleting a folder warns you how many requests it contains.
 - Requests inside folders support the same rename, delete, and saved-response features as top-level requests.
+
+### Drag and Drop
+
+Reorder and organise requests and folders by dragging items in the sidebar.
+
+- **Reorder requests** within a folder or at the collection root by dragging them up and down.
+- **Move requests between folders** by dragging a request onto a different folder.
+- **Reorder folders** within a collection by dragging the folder header.
+
+### Request Body Types
+
+The body tab supports several content types:
+
+- **None** - No request body (shows an informational message).
+- **Raw** - Free-text body with a format sub-selector:
+  - **JSON** (default) - Includes live JSON validation/linting.
+  - **Text** - `text/plain`
+  - **JavaScript** - `application/javascript`
+  - **HTML** - `text/html`
+  - **XML** - `application/xml`
+- **x-www-form-urlencoded** - Key-value pairs encoded as URL parameters.
+- **form-data** - Multipart form data with key-value pairs.
+- **Binary** - Upload a file from disk. Click "Select File" to choose, and "Clear" to remove.
+
+The correct `Content-Type` header is set automatically based on your selection.
+
+### Response Syntax Highlighting
+
+JSON and XML responses are colour-coded for readability:
+
+**JSON** - Keys in teal, string values in yellow, numbers in purple, booleans/null in pink, punctuation in grey.
+
+**XML** - Tag names in teal, attribute names in green, attribute values in yellow, text content in white, punctuation in grey.
+
+The format is auto-detected from the response `Content-Type` header, falling back to content inspection.
 
 ### Certificate Management
 
@@ -210,10 +245,11 @@ aWRnaXRzIFB0eSBMdGQwHhcNMjMwNjE5MTQwNDM5WhcNMjQwNjE4MTQwNDM5WjBF
 
 ## Git Integration
 
-- Each workspace has its own git repository, initialized automatically on creation
-- Collections and environments are saved as JSON files within the workspace
+- All workspaces share a single git repository at the workspaces root directory
+- The repo is initialized automatically when the first workspace is created (or skipped if one already exists, e.g. from a clone)
+- A `.gitignore` at the workspaces root is automatically maintained to exclude `*.secrets.json`, `*.local.json`, `saved-responses/`, `.DS_Store`, and `node_modules/`
+- Collections and environments are saved as JSON files within each workspace subdirectory
 - Variables and form parameters marked as secret are automatically split into `.secrets.json` files
-- `.secrets.json` files are gitignored so credentials are never committed
 - See [Workspaces & Secrets Guide](docs/workspaces-and-secrets.md) for details
 
 ## Development
@@ -236,8 +272,10 @@ npm run dist         # Create distributable packages
 
 🚧 **Planned Features:**
 - Collection runner (batch/sequential request execution)
-- File upload support in form-data bodies
 - Collection export (Postman v2, OpenAPI)
+- Import/export workspaces
+- Workspace templates
+- Encrypted secrets storage
 - Plugin system
 
 ## Contributing
