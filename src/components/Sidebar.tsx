@@ -33,6 +33,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [showNewCollection, setShowNewCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
+  const [newFolderCollectionId, setNewFolderCollectionId] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState('');
   const [editingCollection, setEditingCollection] = useState<string | null>(null);
   const [editingRequest, setEditingRequest] = useState<string | null>(null);
   const [editingFolder, setEditingFolder] = useState<string | null>(null);
@@ -100,6 +102,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     await onSaveCollection(updatedCollection);
     onSelectRequest(newRequest);
+  };
+
+  const createFolder = async (collection: Collection) => {
+    if (!newFolderName.trim()) return;
+    const newFolder: CollectionFolder = {
+      id: Date.now().toString(),
+      name: newFolderName.trim(),
+      requests: [],
+    };
+    const updatedCollection = {
+      ...collection,
+      folders: [...(collection.folders || []), newFolder],
+    };
+    await onSaveCollection(updatedCollection);
+    setNewFolderCollectionId(null);
+    setNewFolderName('');
+    setExpandedFolders(prev => new Set([...prev, newFolder.id]));
   };
 
   const deleteCollection = async (collectionId: string, collectionName: string) => {
@@ -368,6 +387,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        setNewFolderCollectionId(collection.id);
+                        setNewFolderName('');
+                        setExpandedCollections(prev => new Set([...prev, collection.id]));
+                      }}
+                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                      className="button-secondary button"
+                      title="Add folder"
+                    >
+                      📁
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
                         startEditingCollection(collection);
                       }}
                       style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
@@ -394,6 +426,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {expandedCollections.has(collection.id) && (
               <div>
+                {newFolderCollectionId === collection.id && (
+                  <div style={{ display: 'flex', gap: '0.5rem', padding: '0.35rem 0.5rem', borderTop: '1px solid #333' }}>
+                    <input
+                      type="text"
+                      placeholder="Folder name"
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      className="form-input"
+                      style={{ fontSize: '0.8rem', flex: 1 }}
+                      onKeyPress={(e) => e.key === 'Enter' && createFolder(collection)}
+                      autoFocus
+                    />
+                    <button className="button" onClick={() => createFolder(collection)} style={{ fontSize: '0.8rem', padding: '0.2rem 0.4rem' }}>✓</button>
+                    <button className="button-secondary button" onClick={() => { setNewFolderCollectionId(null); setNewFolderName(''); }} style={{ fontSize: '0.8rem', padding: '0.2rem 0.4rem' }}>✗</button>
+                  </div>
+                )}
                 {collection.folders?.map((folder: CollectionFolder) => {
                   const isFolderExpanded = expandedFolders.has(folder.id);
                   return (

@@ -453,31 +453,28 @@ ipcMain.handle('save-collection', async (event, workspaceId, data) => {
     const newFilename = `${sanitizedName}.json`;
     const newSecretsFilename = `${sanitizedName}.secrets.json`;
 
-    // Check if this collection was previously saved with a different name
-    if (data._previousFilename && data._previousFilename !== newFilename) {
-      // Delete old files
-      try {
-        const oldPath = path.join(collectionsDir, data._previousFilename);
-        await fs.unlink(oldPath);
-        console.log('[Electron] Deleted old collection file:', data._previousFilename);
-      } catch (err) {
-        // File might not exist, that's okay
+    // Find and delete any existing file for this collection ID with a different name (handles renames)
+    try {
+      const existingFiles = await fs.readdir(collectionsDir);
+      for (const file of existingFiles) {
+        if (file.endsWith('.json') && !file.endsWith('.secrets.json') && file !== newFilename) {
+          const existingPath = path.join(collectionsDir, file);
+          try {
+            const content = await fs.readFile(existingPath, 'utf-8');
+            const existing = JSON.parse(content);
+            if (existing.id === data.id) {
+              await fs.unlink(existingPath);
+              try { await fs.unlink(path.join(collectionsDir, file.replace('.json', '.secrets.json'))); } catch {}
+              console.log('[Electron] Deleted old collection file on rename:', file);
+              break;
+            }
+          } catch {}
+        }
       }
-
-      try {
-        const oldSecretsPath = path.join(collectionsDir, data._previousFilename.replace('.json', '.secrets.json'));
-        await fs.unlink(oldSecretsPath);
-        console.log('[Electron] Deleted old secrets file');
-      } catch (err) {
-        // Secrets file might not exist, that's okay
-      }
-    }
+    } catch {}
 
     // Split secrets
     const { public: publicData, secrets } = splitSecrets(data);
-
-    // Store the current filename in the data for future renames
-    publicData._previousFilename = newFilename;
 
     // Save public data
     const filePath = path.join(collectionsDir, newFilename);
@@ -585,31 +582,28 @@ ipcMain.handle('save-environment', async (event, workspaceId, data) => {
     const newFilename = `${sanitizedName}.json`;
     const newSecretsFilename = `${sanitizedName}.secrets.json`;
 
-    // Check if this environment was previously saved with a different name
-    if (data._previousFilename && data._previousFilename !== newFilename) {
-      // Delete old files
-      try {
-        const oldPath = path.join(envDir, data._previousFilename);
-        await fs.unlink(oldPath);
-        console.log('[Electron] Deleted old environment file:', data._previousFilename);
-      } catch (err) {
-        // File might not exist, that's okay
+    // Find and delete any existing file for this environment ID with a different name (handles renames)
+    try {
+      const existingFiles = await fs.readdir(envDir);
+      for (const file of existingFiles) {
+        if (file.endsWith('.json') && !file.endsWith('.secrets.json') && file !== newFilename) {
+          const existingPath = path.join(envDir, file);
+          try {
+            const content = await fs.readFile(existingPath, 'utf-8');
+            const existing = JSON.parse(content);
+            if (existing.id === data.id) {
+              await fs.unlink(existingPath);
+              try { await fs.unlink(path.join(envDir, file.replace('.json', '.secrets.json'))); } catch {}
+              console.log('[Electron] Deleted old environment file on rename:', file);
+              break;
+            }
+          } catch {}
+        }
       }
-
-      try {
-        const oldSecretsPath = path.join(envDir, data._previousFilename.replace('.json', '.secrets.json'));
-        await fs.unlink(oldSecretsPath);
-        console.log('[Electron] Deleted old environment secrets file');
-      } catch (err) {
-        // Secrets file might not exist, that's okay
-      }
-    }
+    } catch {}
 
     // Split secrets from environment variables
     const { public: publicData, secrets } = splitSecrets(data);
-
-    // Store the current filename in the data for future renames
-    publicData._previousFilename = newFilename;
 
     // Save public data
     const filePath = path.join(envDir, newFilename);
