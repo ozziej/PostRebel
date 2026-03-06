@@ -45,13 +45,13 @@
       "notarize": true
     },
     "win": {
-      "icon": "assets/SquareLogo.png",
+      "icon": "assets/Post Rebel App Logo.png",
       "target": [
         "nsis"
       ]
     },
     "linux": {
-      "icon": "assets/SquareLogo.png",
+      "icon": "assets/Post Rebel App Logo.png",
       "target": [
         "AppImage",
         "deb"
