@@ -8,6 +8,16 @@ import * as os from 'os';
 
 let mainWindow: BrowserWindow;
 
+function getWindowIconPath(): string {
+  const iconFile = 'Post Rebel App Logo.png';
+
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'assets', iconFile);
+  }
+
+  return path.join(app.getAppPath(), 'assets', iconFile);
+}
+
 // Settings storage
 let cachedSettings: any = null;
 
@@ -45,6 +55,7 @@ const createWindow = async () => {
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: wb?.width || 1200,
     height: wb?.height || 800,
+    icon: getWindowIconPath(),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

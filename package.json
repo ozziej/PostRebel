@@ -40,6 +40,12 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "assets/Post Rebel App Logo.png",
+        "to": "assets/Post Rebel App Logo.png"
+      }
+    ],
     "mac": {
       "icon": "assets/icon.icns",
       "notarize": true
@@ -52,6 +58,11 @@
     },
     "linux": {
       "icon": "assets/Post Rebel App Logo.png",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "postrebel"
+        }
+      },
       "target": [
         "AppImage",
         "deb"
