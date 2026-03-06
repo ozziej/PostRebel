@@ -1,4 +1,4 @@
-import { Collection, ApiRequest, Environment, EnvironmentVariable, KeyValuePair } from '../types';
+import { Collection, CollectionFolder, ApiRequest, Environment, EnvironmentVariable, KeyValuePair } from '../types';
 
 interface PostmanCollectionResult {
   collection: Collection;
@@ -34,14 +34,14 @@ export function importPostmanCollection(json: string): PostmanCollectionResult {
   const collectionId = Date.now().toString();
   const collectionName = data.info.name || 'Imported Collection';
 
-  // Recursively flatten items
-  const requests: ApiRequest[] = [];
-  flattenItems(data.item || [], '', requests, errors);
+  // Parse top-level items, preserving folder structure
+  const { requests, folders } = parseTopLevelItems(data.item || [], errors);
 
   const collection: Collection = {
     id: collectionId,
     name: collectionName,
     requests,
+    folders: folders.length > 0 ? folders : undefined,
   };
 
   const result: PostmanCollectionResult = { collection, errors };
@@ -73,20 +73,45 @@ export function importPostmanCollection(json: string): PostmanCollectionResult {
   return result;
 }
 
-function flattenItems(items: any[], prefix: string, requests: ApiRequest[], errors: string[]): void {
+function parseTopLevelItems(items: any[], errors: string[]): { requests: ApiRequest[]; folders: CollectionFolder[] } {
+  const requests: ApiRequest[] = [];
+  const folders: CollectionFolder[] = [];
+
   for (const item of items) {
     if (item.item && Array.isArray(item.item)) {
-      // This is a folder — recurse
-      const folderName = prefix ? `${prefix} / ${item.name || 'Folder'}` : (item.name || 'Folder');
-      flattenItems(item.item, folderName, requests, errors);
+      // This is a folder — create a CollectionFolder
+      const folderRequests: ApiRequest[] = [];
+      flattenFolderItems(item.item, folderRequests, errors);
+      folders.push({
+        id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
+        name: item.name || 'Folder',
+        requests: folderRequests,
+      });
     } else if (item.request) {
-      // This is a request
-      const name = prefix ? `${prefix} / ${item.name || 'Request'}` : (item.name || 'Request');
+      // Top-level request (not inside any folder)
       try {
-        const apiRequest = parsePostmanRequest(item, name, errors);
+        const apiRequest = parsePostmanRequest(item, item.name || 'Request', errors);
         requests.push(apiRequest);
       } catch (e: any) {
-        errors.push(`Failed to parse request "${name}": ${e.message}`);
+        errors.push(`Failed to parse request "${item.name}": ${e.message}`);
+      }
+    }
+  }
+
+  return { requests, folders };
+}
+
+function flattenFolderItems(items: any[], requests: ApiRequest[], errors: string[]): void {
+  for (const item of items) {
+    if (item.item && Array.isArray(item.item)) {
+      // Nested sub-folder — flatten into parent folder since CollectionFolder doesn't support nesting
+      flattenFolderItems(item.item, requests, errors);
+    } else if (item.request) {
+      try {
+        const apiRequest = parsePostmanRequest(item, item.name || 'Request', errors);
+        requests.push(apiRequest);
+      } catch (e: any) {
+        errors.push(`Failed to parse request "${item.name}": ${e.message}`);
       }
     }
   }

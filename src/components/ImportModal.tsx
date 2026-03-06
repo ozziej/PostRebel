@@ -289,11 +289,26 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   {preview.collection.name}
                 </div>
                 <div style={{ fontSize: '0.85rem', color: '#888' }}>
-                  {preview.collection.requests.length} request{preview.collection.requests.length !== 1 ? 's' : ''}
+                  {totalRequestCount} request{totalRequestCount !== 1 ? 's' : ''}
+                  {(preview.collection.folders || []).length > 0 && (
+                    <span> in {(preview.collection.folders || []).length} folder{(preview.collection.folders || []).length !== 1 ? 's' : ''}</span>
+                  )}
+                  {preview.collection.requests.length > 0 && (preview.collection.folders || []).length > 0 && (
+                    <span> + {preview.collection.requests.length} ungrouped</span>
+                  )}
                   {preview.collectionVariables && (
                     <span> + {Object.keys(preview.collectionVariables.variables).length} collection variable{Object.keys(preview.collectionVariables.variables).length !== 1 ? 's' : ''}</span>
                   )}
                 </div>
+                {(preview.collection.folders || []).length > 0 && (
+                  <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#aaa' }}>
+                    {(preview.collection.folders as any[]).map((f: any, i: number) => (
+                      <span key={i} style={{ marginRight: '0.5rem', color: '#888' }}>
+                        ▸ {f.name} ({f.requests.length})
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {preview.collection.requests.length > 0 && (
                   <div style={{ marginTop: '0.5rem', maxHeight: '120px', overflowY: 'auto' }}>
                     {preview.collection.requests.map((r: any, i: number) => (

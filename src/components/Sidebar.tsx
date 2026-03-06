@@ -451,8 +451,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           onClick={() => { if (editingFolder !== folder.id) toggleFolder(folder.id); }}
                           style={{ display: 'flex', alignItems: 'center', flex: 1, cursor: editingFolder === folder.id ? 'default' : 'pointer', minWidth: 0, overflow: 'hidden' }}
                         >
-                          <span style={{ color: '#888', fontSize: '0.7rem', marginRight: '0.4rem', flexShrink: 0 }}>
-                            {isFolderExpanded ? '▾' : '▸'}
+                          <span style={{ marginRight: '0.5rem', flexShrink: 0 }}>
+                            {isFolderExpanded ? '▼' : '▶'}
                           </span>
                           {editingFolder === folder.id ? (
                             <input
