@@ -183,20 +183,8 @@ ipcMain.handle('create-workspace', async (event, name, description) => {
     const metadataPath = path.join(workspacePath, 'workspace.json');
     await fs.writeFile(metadataPath, JSON.stringify(workspace, null, 2));
 
-    // Initialize git in workspace
-    const git = simpleGit(workspacePath);
-    await git.init();
-
-    // Create .gitignore for workspace
-    const gitignorePath = path.join(workspacePath, '.gitignore');
-    const gitignoreContent = `
-*.secrets.json
-*.local.json
-.DS_Store
-node_modules/
-saved-responses/
-    `.trim();
-    await fs.writeFile(gitignorePath, gitignoreContent);
+    // Ensure git is initialized at the workspaces base directory (not per-workspace)
+    await ensureGitAtWorkspacesRoot(workspacesDir);
 
     console.log('[Electron] Created workspace:', finalWorkspaceId);
     return { success: true, workspace };
@@ -384,6 +372,48 @@ async function getWorkspacePath(workspaceId?: string): Promise<string> {
   }
   const workspacesDir = await getWorkspacesBaseDir();
   return path.join(workspacesDir, workspaceId);
+}
+
+// Ensure the workspaces root directory has a git repo and a proper .gitignore.
+// Only initializes if no repo exists already (so user-provided repos are respected).
+async function ensureGitAtWorkspacesRoot(workspacesDir: string): Promise<void> {
+  const git = simpleGit(workspacesDir);
+
+  try {
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      await git.init();
+      console.log('[Electron] Initialized git repo at workspaces root:', workspacesDir);
+    }
+  } catch {
+    // checkIsRepo can throw if git is not installed; swallow and skip
+    console.warn('[Electron] Could not check/init git at workspaces root');
+    return;
+  }
+
+  // Always ensure .gitignore covers secrets and other non-tracked files
+  const gitignorePath = path.join(workspacesDir, '.gitignore');
+  const requiredEntries = [
+    '*.secrets.json',
+    '*.local.json',
+    '.DS_Store',
+    'node_modules/',
+    'saved-responses/',
+  ];
+
+  let existing = '';
+  try {
+    existing = await fs.readFile(gitignorePath, 'utf-8');
+  } catch {
+    // File doesn't exist yet
+  }
+
+  const missing = requiredEntries.filter(entry => !existing.split('\n').map(l => l.trim()).includes(entry));
+  if (missing.length > 0) {
+    const updated = existing.trimEnd() + (existing ? '\n' : '') + missing.join('\n') + '\n';
+    await fs.writeFile(gitignorePath, updated);
+    console.log('[Electron] Updated .gitignore at workspaces root with:', missing);
+  }
 }
 
 // Sanitize filename to be filesystem-safe
