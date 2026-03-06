@@ -28,7 +28,6 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
   const formatJsonResponse = (data: any): string => {
     try {
       if (typeof data === 'string') {
-        // Try to parse if it's a JSON string
         try {
           return JSON.stringify(JSON.parse(data), null, 2);
         } catch {
@@ -39,6 +38,141 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
     } catch {
       return String(data);
     }
+  };
+
+  const highlightJson = (jsonStr: string): React.ReactNode[] => {
+    const nodes: React.ReactNode[] = [];
+    // Regex to match JSON tokens: strings, numbers, booleans, null, punctuation
+    const tokenRegex = /("(?:[^"\\]|\\.)*")\s*:/g;
+    const valueRegex = /("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(\btrue\b|\bfalse\b|\bnull\b)|([{}[\],:])/g;
+
+    // First pass: identify which strings are keys by finding "key": patterns
+    const keyPositions = new Set<number>();
+    let keyMatch;
+    while ((keyMatch = tokenRegex.exec(jsonStr)) !== null) {
+      keyPositions.add(keyMatch.index);
+    }
+
+    let lastIndex = 0;
+    let match;
+    valueRegex.lastIndex = 0;
+    let nodeIndex = 0;
+
+    while ((match = valueRegex.exec(jsonStr)) !== null) {
+      // Add any whitespace/text between tokens
+      if (match.index > lastIndex) {
+        nodes.push(jsonStr.substring(lastIndex, match.index));
+      }
+
+      const [fullMatch] = match;
+
+      if (match[1] !== undefined) {
+        // It's a string - check if it's a key or value
+        if (keyPositions.has(match.index)) {
+          nodes.push(<span key={nodeIndex++} style={{ color: '#0d9e9e' }}>{fullMatch}</span>);
+        } else {
+          nodes.push(<span key={nodeIndex++} style={{ color: '#e6db74' }}>{fullMatch}</span>);
+        }
+      } else if (match[2] !== undefined) {
+        // Number
+        nodes.push(<span key={nodeIndex++} style={{ color: '#ae81ff' }}>{fullMatch}</span>);
+      } else if (match[3] !== undefined) {
+        // Boolean or null
+        nodes.push(<span key={nodeIndex++} style={{ color: '#f92672' }}>{fullMatch}</span>);
+      } else if (match[4] !== undefined) {
+        // Punctuation
+        nodes.push(<span key={nodeIndex++} style={{ color: '#888888' }}>{fullMatch}</span>);
+      }
+
+      lastIndex = match.index + fullMatch.length;
+    }
+
+    // Add any remaining text
+    if (lastIndex < jsonStr.length) {
+      nodes.push(jsonStr.substring(lastIndex));
+    }
+
+    return nodes;
+  };
+
+  const highlightXml = (xmlStr: string): React.ReactNode[] => {
+    const nodes: React.ReactNode[] = [];
+    // Regex to match XML tokens: tags, attributes, text
+    const xmlTokenRegex = /(<\/?)([\w:.-]+)((?:\s+[\w:.-]+\s*=\s*"[^"]*")*)\s*(\/?>)|([^<]+)/g;
+    const attrRegex = /([\w:.-]+)\s*=\s*("[^"]*")/g;
+    let match;
+    let nodeIndex = 0;
+
+    while ((match = xmlTokenRegex.exec(xmlStr)) !== null) {
+      if (match[5] !== undefined) {
+        // Text content
+        nodes.push(<span key={nodeIndex++} style={{ color: '#ffffff' }}>{match[5]}</span>);
+      } else {
+        // Tag open bracket
+        nodes.push(<span key={nodeIndex++} style={{ color: '#888888' }}>{match[1]}</span>);
+        // Tag name
+        nodes.push(<span key={nodeIndex++} style={{ color: '#0d9e9e' }}>{match[2]}</span>);
+        // Attributes
+        if (match[3]) {
+          const attrStr = match[3];
+          let attrMatch;
+          let attrLastIndex = 0;
+          attrRegex.lastIndex = 0;
+          while ((attrMatch = attrRegex.exec(attrStr)) !== null) {
+            // Whitespace before attribute
+            if (attrMatch.index > attrLastIndex) {
+              nodes.push(attrStr.substring(attrLastIndex, attrMatch.index));
+            }
+            // Attribute name
+            nodes.push(<span key={nodeIndex++} style={{ color: '#a6e22e' }}>{attrMatch[1]}</span>);
+            nodes.push(<span key={nodeIndex++} style={{ color: '#888888' }}>=</span>);
+            // Attribute value
+            nodes.push(<span key={nodeIndex++} style={{ color: '#e6db74' }}>{attrMatch[2]}</span>);
+            attrLastIndex = attrMatch.index + attrMatch[0].length;
+          }
+          if (attrLastIndex < attrStr.length) {
+            nodes.push(attrStr.substring(attrLastIndex));
+          }
+        }
+        // Closing bracket
+        nodes.push(<span key={nodeIndex++} style={{ color: '#888888' }}>{match[4]}</span>);
+      }
+    }
+
+    return nodes;
+  };
+
+  const detectContentFormat = (data: any, headers: Record<string, string>): 'json' | 'xml' | 'text' => {
+    const contentType = Object.entries(headers).find(
+      ([k]) => k.toLowerCase() === 'content-type'
+    )?.[1] || '';
+
+    if (contentType.includes('json')) return 'json';
+    if (contentType.includes('xml')) return 'xml';
+
+    // Try parsing as JSON
+    const dataStr = typeof data === 'string' ? data : '';
+    if (typeof data === 'object' && data !== null) return 'json';
+    if (dataStr.trim().startsWith('{') || dataStr.trim().startsWith('[')) {
+      try { JSON.parse(dataStr); return 'json'; } catch {}
+    }
+    if (dataStr.trim().startsWith('<')) return 'xml';
+
+    return 'text';
+  };
+
+  const renderHighlightedResponse = (data: any): React.ReactNode => {
+    if (!response) return null;
+    const format = detectContentFormat(data, response.headers);
+    const formatted = formatJsonResponse(data);
+
+    if (format === 'json') {
+      return <>{highlightJson(formatted)}</>;
+    }
+    if (format === 'xml') {
+      return <>{highlightXml(formatted)}</>;
+    }
+    return formatted;
   };
 
   const getStatusClass = (status: number): string => {
@@ -256,7 +390,7 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
             ) : null}
 
             <div className="response-json">
-              {formatJsonResponse(response.data)}
+              {renderHighlightedResponse(response.data)}
             </div>
           </>
         )}

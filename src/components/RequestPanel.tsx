@@ -63,12 +63,13 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
     setLocalRequest(request);
   }, [request]);
 
-  // Debounced JSON validation
-  const rawBody = localRequest?.body?.type === 'raw' ? (localRequest.body.data as string) : '';
+  // Debounced JSON validation (only when raw subtype is json)
+  const isJsonRaw = localRequest?.body?.type === 'raw' && (localRequest.body.rawSubtype || 'json') === 'json';
+  const rawBody = isJsonRaw ? (localRequest.body!.data as string) : '';
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    if (!rawBody || rawBody.trim() === '') {
+    if (!isJsonRaw || !rawBody || rawBody.trim() === '') {
       setJsonValidation(null);
       return;
     }
@@ -92,7 +93,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [rawBody]);
+  }, [rawBody, isJsonRaw]);
 
   if (!localRequest) {
     return (
@@ -332,48 +333,109 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
 
       {activeTab === 'body' && (
         <div>
-          <div className="form-group">
-            <label>Body Type</label>
-            <select
-              className="form-input"
-              value={localRequest.body?.type || 'raw'}
-              onChange={(e) => {
-                const type = e.target.value as 'raw' | 'form-data' | 'x-www-form-urlencoded';
-                if (type === 'raw') {
-                  updateRequest({
-                    body: { type, data: localRequest.body?.data || '' }
-                  });
-                } else {
-                  // Initialize with empty form data array
-                  updateRequest({
-                    body: {
-                      type,
-                      data: '',
-                      formData: localRequest.body?.formData || []
-                    }
-                  });
-                }
-              }}
-            >
-              <option value="raw">Raw (JSON)</option>
-              <option value="x-www-form-urlencoded">x-www-form-urlencoded</option>
-              <option value="form-data">form-data</option>
-            </select>
+          <div className="form-group" style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
+            <div style={{ flex: 1 }}>
+              <label>Body Type</label>
+              <select
+                className="form-input"
+                value={localRequest.body?.type || 'none'}
+                onChange={(e) => {
+                  const type = e.target.value as 'none' | 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'binary';
+                  if (type === 'none') {
+                    updateRequest({ body: { type: 'none', data: '' } });
+                  } else if (type === 'raw') {
+                    updateRequest({
+                      body: {
+                        type,
+                        rawSubtype: localRequest.body?.rawSubtype || 'json',
+                        data: typeof localRequest.body?.data === 'string' ? localRequest.body.data : ''
+                      }
+                    });
+                  } else if (type === 'binary') {
+                    updateRequest({
+                      body: {
+                        type: 'binary',
+                        data: localRequest.body?.type === 'binary' ? localRequest.body.data : '',
+                        binaryFileName: localRequest.body?.type === 'binary' ? localRequest.body.binaryFileName : undefined,
+                        binaryFilePath: localRequest.body?.type === 'binary' ? localRequest.body.binaryFilePath : undefined,
+                      }
+                    });
+                  } else {
+                    updateRequest({
+                      body: {
+                        type,
+                        data: '',
+                        formData: localRequest.body?.formData || []
+                      }
+                    });
+                  }
+                }}
+              >
+                <option value="none">None</option>
+                <option value="raw">Raw</option>
+                <option value="x-www-form-urlencoded">x-www-form-urlencoded</option>
+                <option value="form-data">form-data</option>
+                <option value="binary">Binary</option>
+              </select>
+            </div>
+            {localRequest.body?.type === 'raw' && (
+              <div style={{ flex: 1 }}>
+                <label>Format</label>
+                <select
+                  className="form-input"
+                  value={localRequest.body?.rawSubtype || 'json'}
+                  onChange={(e) => {
+                    const rawSubtype = e.target.value as 'text' | 'javascript' | 'json' | 'html' | 'xml';
+                    updateRequest({
+                      body: {
+                        ...localRequest.body!,
+                        rawSubtype
+                      }
+                    });
+                  }}
+                >
+                  <option value="json">JSON</option>
+                  <option value="text">Text</option>
+                  <option value="javascript">JavaScript</option>
+                  <option value="html">HTML</option>
+                  <option value="xml">XML</option>
+                </select>
+              </div>
+            )}
           </div>
 
-          {localRequest.body?.type === 'raw' ? (
+          {localRequest.body?.type === 'none' && (
+            <div style={{
+              padding: '1.5rem',
+              textAlign: 'center',
+              color: '#666',
+              fontSize: '0.9rem',
+              fontStyle: 'italic',
+            }}>
+              This request does not have a body
+            </div>
+          )}
+
+          {localRequest.body?.type === 'raw' && (
             <>
               <VariableInput
                 value={typeof localRequest.body?.data === 'string' ? localRequest.body.data : ''}
                 onChange={(value) => updateRequest({
                   body: {
+                    ...localRequest.body!,
                     type: 'raw',
                     data: value
                   }
                 })}
                 environment={environment}
                 onUpdateVariable={onUpdateVariable}
-                placeholder='{\n  "key": "value"\n}'
+                placeholder={
+                  (localRequest.body?.rawSubtype || 'json') === 'json'
+                    ? '{\n  "key": "value"\n}'
+                    : (localRequest.body?.rawSubtype === 'xml'
+                      ? '<root>\n  <element>value</element>\n</root>'
+                      : 'Enter request body...')
+                }
                 className="form-textarea"
                 style={{ minHeight: '200px' }}
                 multiline={true}
@@ -392,7 +454,67 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                 </div>
               )}
             </>
-          ) : (
+          )}
+
+          {localRequest.body?.type === 'binary' && (
+            <div style={{
+              padding: '1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+            }}>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  className="button"
+                  onClick={async () => {
+                    const result = await window.electronAPI.selectBinaryFile();
+                    if (result.success && result.base64Data) {
+                      updateRequest({
+                        body: {
+                          type: 'binary',
+                          data: result.base64Data,
+                          binaryFilePath: result.filePath,
+                          binaryFileName: result.fileName,
+                        }
+                      });
+                    }
+                  }}
+                >
+                  Select File
+                </button>
+                {localRequest.body.binaryFileName && (
+                  <>
+                    <span style={{ color: '#ccc', fontSize: '0.85rem' }}>
+                      {localRequest.body.binaryFileName}
+                    </span>
+                    <button
+                      className="button-secondary button"
+                      onClick={() => {
+                        updateRequest({
+                          body: {
+                            type: 'binary',
+                            data: '',
+                            binaryFileName: undefined,
+                            binaryFilePath: undefined,
+                          }
+                        });
+                      }}
+                      style={{ fontSize: '0.8rem' }}
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+              {!localRequest.body.binaryFileName && (
+                <div style={{ color: '#666', fontSize: '0.85rem', fontStyle: 'italic' }}>
+                  No file selected
+                </div>
+              )}
+            </div>
+          )}
+
+          {(localRequest.body?.type === 'form-data' || localRequest.body?.type === 'x-www-form-urlencoded') && (
             <KeyValueEditor
               data={localRequest.body?.formData || []}
               onChange={(formData) => updateRequest({

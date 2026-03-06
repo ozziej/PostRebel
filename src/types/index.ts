@@ -12,9 +12,12 @@ export interface ApiRequest {
   url: string;
   headers: Record<string, string>;
   body?: {
-    type: 'raw' | 'form-data' | 'x-www-form-urlencoded';
+    type: 'none' | 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'binary';
+    rawSubtype?: 'text' | 'javascript' | 'json' | 'html' | 'xml';
     data: string | FormData | Record<string, string>;
     formData?: Array<KeyValuePair>;
+    binaryFilePath?: string;
+    binaryFileName?: string;
   };
   auth?: {
     type: 'none' | 'bearer' | 'basic' | 'jwt';
@@ -150,6 +153,7 @@ declare global {
 
       // Import
       selectJsonFile: () => Promise<{ success: boolean; content?: string; error?: string }>;
+      selectBinaryFile: () => Promise<{ success: boolean; filePath?: string; fileName?: string; base64Data?: string; error?: string }>;
 
       // History
       loadHistory: (workspaceId: string) => Promise<{ success: boolean; entries?: RequestHistoryEntry[]; error?: string }>;

@@ -81,14 +81,32 @@ export class HttpService {
       }
 
       // Handle request body
-      if (request.body && ['POST', 'PUT', 'PATCH'].includes(request.method)) {
+      if (request.body && request.body.type !== 'none' && ['POST', 'PUT', 'PATCH'].includes(request.method)) {
         switch (request.body.type) {
-          case 'raw':
+          case 'raw': {
             config.data = this.replaceVariables(request.body.data as string, environment);
             if (!headers['Content-Type']) {
-              headers['Content-Type'] = 'application/json';
+              const rawContentTypes: Record<string, string> = {
+                text: 'text/plain',
+                javascript: 'application/javascript',
+                json: 'application/json',
+                html: 'text/html',
+                xml: 'application/xml',
+              };
+              headers['Content-Type'] = rawContentTypes[request.body.rawSubtype || 'json'] || 'application/json';
             }
             break;
+          }
+          case 'binary': {
+            // Pass base64 data to main process for decoding
+            if (request.body.data) {
+              config.binaryData = request.body.data;
+            }
+            if (!headers['Content-Type']) {
+              headers['Content-Type'] = 'application/octet-stream';
+            }
+            break;
+          }
           case 'x-www-form-urlencoded':
             // Use formData array if available, otherwise fall back to data string
             if (request.body.formData && request.body.formData.length > 0) {

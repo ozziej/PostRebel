@@ -194,8 +194,17 @@ export function parseCurl(curlString: string): CurlParseResult {
       formData,
     };
   } else if (bodyRaw) {
+    // Infer raw subtype from Content-Type header
+    const contentType = headers['Content-Type'] || headers['content-type'] || '';
+    let rawSubtype: 'text' | 'javascript' | 'json' | 'html' | 'xml' = 'json';
+    if (contentType.includes('xml')) rawSubtype = 'xml';
+    else if (contentType.includes('html')) rawSubtype = 'html';
+    else if (contentType.includes('javascript')) rawSubtype = 'javascript';
+    else if (contentType.includes('text/plain')) rawSubtype = 'text';
+
     body = {
       type: 'raw',
+      rawSubtype,
       data: bodyRaw,
     };
   }

@@ -765,6 +765,30 @@ ipcMain.handle('load-certificate-file', async () => {
   }
 });
 
+ipcMain.handle('select-binary-file', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, error: 'No file selected' };
+    }
+
+    const filePath = result.filePaths[0];
+    const fileName = path.basename(filePath);
+    const fileBuffer = await fs.readFile(filePath);
+    const base64Data = fileBuffer.toString('base64');
+
+    return { success: true, filePath, fileName, base64Data };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 ipcMain.handle('select-json-file', async () => {
   try {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -948,11 +972,17 @@ ipcMain.handle('execute-http-request', async (event, requestConfig) => {
       key: requestConfig.key
     });
 
+    // Handle binary data: decode base64 into Buffer
+    let requestData = requestConfig.data;
+    if (requestConfig.binaryData) {
+      requestData = Buffer.from(requestConfig.binaryData, 'base64');
+    }
+
     const config: AxiosRequestConfig = {
       method: requestConfig.method,
       url: requestConfig.url,
       headers: requestConfig.headers || {},
-      data: requestConfig.data,
+      data: requestData,
       timeout: requestConfig.timeout || 30000,
       httpsAgent,
       // Important: This allows axios to work in Node.js without CORS

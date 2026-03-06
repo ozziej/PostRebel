@@ -201,7 +201,7 @@ export function importOpenApi(input: string): OpenApiImportResult {
           }
           if (exampleData !== undefined && exampleData !== null) {
             bodyCandidates = [{
-              body: { type: 'raw', data: JSON.stringify(exampleData, null, 2) },
+              body: { type: 'raw', rawSubtype: 'json', data: JSON.stringify(exampleData, null, 2) },
             }];
           }
         }
@@ -222,18 +222,18 @@ export function importOpenApi(input: string): OpenApiImportResult {
                 const exValue = exObj.value !== undefined ? exObj.value : exObj;
                 return {
                   exampleName: exName,
-                  body: { type: 'raw' as const, data: JSON.stringify(exValue, null, 2) },
+                  body: { type: 'raw' as const, rawSubtype: 'json' as const, data: JSON.stringify(exValue, null, 2) },
                 };
               });
             } else if (mediaContent.example !== undefined) {
               bodyCandidates = [{
-                body: { type: 'raw', data: JSON.stringify(mediaContent.example, null, 2) },
+                body: { type: 'raw', rawSubtype: 'json', data: JSON.stringify(mediaContent.example, null, 2) },
               }];
             } else if (mediaContent.schema) {
               const exData = generateExampleFromSchema(mediaContent.schema, spec);
               if (exData !== undefined && exData !== null) {
                 bodyCandidates = [{
-                  body: { type: 'raw', data: JSON.stringify(exData, null, 2) },
+                  body: { type: 'raw', rawSubtype: 'json', data: JSON.stringify(exData, null, 2) },
                 }];
               }
             }

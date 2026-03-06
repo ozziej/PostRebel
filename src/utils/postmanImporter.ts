@@ -151,8 +151,17 @@ function parsePostmanRequest(item: any, name: string, errors: string[]): ApiRequ
   if (req.body) {
     const mode = req.body.mode;
     if (mode === 'raw') {
+      // Detect subtype from Postman's language option if available
+      const rawLang = req.body.options?.raw?.language || '';
+      let rawSubtype: 'text' | 'javascript' | 'json' | 'html' | 'xml' = 'json';
+      if (rawLang === 'xml') rawSubtype = 'xml';
+      else if (rawLang === 'html') rawSubtype = 'html';
+      else if (rawLang === 'javascript') rawSubtype = 'javascript';
+      else if (rawLang === 'text') rawSubtype = 'text';
+
       body = {
         type: 'raw',
+        rawSubtype,
         data: req.body.raw || '',
       };
     } else if (mode === 'formdata') {

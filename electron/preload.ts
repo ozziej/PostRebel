@@ -38,6 +38,7 @@ export interface ElectronAPI {
 
   // Import
   selectJsonFile: () => Promise<{ success: boolean; content?: string; error?: string }>;
+  selectBinaryFile: () => Promise<{ success: boolean; filePath?: string; fileName?: string; base64Data?: string; error?: string }>;
 
   // History
   loadHistory: (workspaceId: string) => Promise<any>;
@@ -89,6 +90,7 @@ const api: ElectronAPI = {
 
   // Import
   selectJsonFile: () => ipcRenderer.invoke('select-json-file'),
+  selectBinaryFile: () => ipcRenderer.invoke('select-binary-file'),
 
   // History
   loadHistory: (workspaceId) => ipcRenderer.invoke('load-history', workspaceId),
