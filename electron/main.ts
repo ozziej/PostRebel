@@ -48,6 +48,49 @@ async function getWorkspacesBaseDir(): Promise<string> {
   return settings.workspacesDirectory;
 }
 
+async function saveEnvironmentData(workspaceId: string | undefined, data: any): Promise<string> {
+  const basePath = await getWorkspacePath(workspaceId);
+  const envDir = path.join(basePath, 'environments');
+  await fs.mkdir(envDir, { recursive: true });
+
+  const sanitizedName = sanitizeFilename(data.name);
+  const newFilename = `${sanitizedName}.json`;
+  const newSecretsFilename = `${sanitizedName}.secrets.json`;
+
+  // Remove a previously saved file for the same environment when the name changes.
+  try {
+    const existingFiles = await fs.readdir(envDir);
+    for (const file of existingFiles) {
+      if (file.endsWith('.json') && !file.endsWith('.secrets.json') && file !== newFilename) {
+        const existingPath = path.join(envDir, file);
+        try {
+          const content = await fs.readFile(existingPath, 'utf-8');
+          const existing = JSON.parse(content);
+          if (existing.id === data.id) {
+            await fs.unlink(existingPath);
+            try { await fs.unlink(path.join(envDir, file.replace('.json', '.secrets.json'))); } catch {}
+            console.log('[Electron] Deleted old environment file on rename:', file);
+            break;
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+
+  const { public: publicData, secrets } = splitSecrets(data);
+
+  const filePath = path.join(envDir, newFilename);
+  await fs.writeFile(filePath, JSON.stringify(publicData, null, 2));
+
+  if (secrets.variables && Object.keys(secrets.variables).length > 0) {
+    const secretsPath = path.join(envDir, newSecretsFilename);
+    await fs.writeFile(secretsPath, JSON.stringify(secrets, null, 2));
+  }
+
+  console.log('[Electron] Saved environment:', newFilename);
+  return filePath;
+}
+
 const createWindow = async () => {
   const settings = await getSettings();
   const wb = settings.windowBounds;
@@ -193,6 +236,13 @@ ipcMain.handle('create-workspace', async (event, name, description) => {
 
     const metadataPath = path.join(workspacePath, 'workspace.json');
     await fs.writeFile(metadataPath, JSON.stringify(workspace, null, 2));
+
+    await saveEnvironmentData(finalWorkspaceId, {
+      id: `env-${Date.now()}`,
+      name: 'Development',
+      variables: {},
+      variablesArray: []
+    });
 
     // Ensure git is initialized at the workspaces base directory (not per-workspace)
     await ensureGitAtWorkspacesRoot(workspacesDir);
@@ -613,51 +663,7 @@ ipcMain.handle('delete-collection', async (event, workspaceId, collectionName) =
 
 ipcMain.handle('save-environment', async (event, workspaceId, data) => {
   try {
-    const basePath = await getWorkspacePath(workspaceId);
-    const envDir = workspaceId
-      ? path.join(basePath, 'environments')
-      : path.join(basePath, 'environments');
-    await fs.mkdir(envDir, { recursive: true });
-
-    // Sanitize the filename
-    const sanitizedName = sanitizeFilename(data.name);
-    const newFilename = `${sanitizedName}.json`;
-    const newSecretsFilename = `${sanitizedName}.secrets.json`;
-
-    // Find and delete any existing file for this environment ID with a different name (handles renames)
-    try {
-      const existingFiles = await fs.readdir(envDir);
-      for (const file of existingFiles) {
-        if (file.endsWith('.json') && !file.endsWith('.secrets.json') && file !== newFilename) {
-          const existingPath = path.join(envDir, file);
-          try {
-            const content = await fs.readFile(existingPath, 'utf-8');
-            const existing = JSON.parse(content);
-            if (existing.id === data.id) {
-              await fs.unlink(existingPath);
-              try { await fs.unlink(path.join(envDir, file.replace('.json', '.secrets.json'))); } catch {}
-              console.log('[Electron] Deleted old environment file on rename:', file);
-              break;
-            }
-          } catch {}
-        }
-      }
-    } catch {}
-
-    // Split secrets from environment variables
-    const { public: publicData, secrets } = splitSecrets(data);
-
-    // Save public data
-    const filePath = path.join(envDir, newFilename);
-    await fs.writeFile(filePath, JSON.stringify(publicData, null, 2));
-
-    // Save secrets if any
-    if (secrets.variables && Object.keys(secrets.variables).length > 0) {
-      const secretsPath = path.join(envDir, newSecretsFilename);
-      await fs.writeFile(secretsPath, JSON.stringify(secrets, null, 2));
-    }
-
-    console.log('[Electron] Saved environment:', newFilename);
+    const filePath = await saveEnvironmentData(workspaceId, data);
     return { success: true, path: filePath };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
