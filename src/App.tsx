@@ -11,6 +11,7 @@ import { EnvironmentManager } from './components/EnvironmentManager';
 import { WorkspaceManager } from './components/WorkspaceManager';
 import { SettingsModal } from './components/SettingsModal';
 import { ImportModal, ImportTab } from './components/ImportModal';
+import { SearchBar, SearchOptions } from './components/SearchBar';
 import { HttpService } from './utils/httpService';
 import { ScriptRunner } from './utils/scriptRunner';
 import './App.css';
@@ -38,6 +39,9 @@ function App() {
   const [requestHistory, setRequestHistory] = useState<RequestHistoryEntry[]>([]);
   const [savedResponses, setSavedResponses] = useState<SavedResponse[]>([]);
   const [activeSavedResponse, setActiveSavedResponse] = useState<SavedResponse | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchOptions, setSearchOptions] = useState<SearchOptions>({ caseSensitive: false, wholeWords: false, useRegex: false });
   const savedPrefsRef = useRef<{ activeWorkspaceId?: string; activeEnvironmentId?: string }>({});
 
   useEffect(() => {
@@ -66,6 +70,20 @@ function App() {
       loadData();
     }
   }, [activeWorkspace]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+F or Cmd+F to open search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        setIsSearchOpen(true);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const loadWorkspaces = async () => {
     try {
@@ -391,6 +409,16 @@ function App() {
     window.electronAPI.savePreference('sidebarWidth', width);
   }, []);
 
+  const handleSearch = (term: string, options: SearchOptions) => {
+    setSearchTerm(term);
+    setSearchOptions(options);
+  };
+
+  const handleCloseSearch = () => {
+    setIsSearchOpen(false);
+    setSearchTerm('');
+  };
+
   const openImportModal = (tab: ImportTab = 'collection') => {
     setImportModalTab(tab);
     setShowImportModal(true);
@@ -634,6 +662,12 @@ function App() {
         onOpenSettings={() => setShowSettings(true)}
       />
 
+      <SearchBar
+        isOpen={isSearchOpen}
+        onClose={handleCloseSearch}
+        onSearch={handleSearch}
+      />
+
       <div className="app-body">
         <ResizableSidebar defaultWidth={sidebarWidth} minWidth={250} maxWidth={600} onWidthChange={handleSidebarWidthChange}>
           <Sidebar
@@ -661,6 +695,8 @@ function App() {
           isLoading={isLoading}
           requestHistory={requestHistory}
           isReadOnly={activeSavedResponse !== null}
+          searchTerm={searchTerm}
+          searchOptions={searchOptions}
         />
 
         <ResponsePanel
@@ -669,6 +705,8 @@ function App() {
           isLoading={isLoading}
           activeSavedResponse={activeSavedResponse}
           onSaveResponse={handleSaveSavedResponse}
+          searchTerm={searchTerm}
+          searchOptions={searchOptions}
         />
         </div>
       </div>

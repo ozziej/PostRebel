@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ApiRequest, Environment, RequestHistoryEntry } from '../types';
 import { KeyValueEditor } from './KeyValueEditor';
 import { VariableInput } from './VariableInput';
+import { SearchOptions } from './SearchBar';
+import { findMatches, highlightText } from '../utils/searchHighlight';
 import jsonlint from 'jsonlint-mod';
 
 function formatRelativeTime(isoDate: string): string {
@@ -41,6 +43,8 @@ interface RequestPanelProps {
   isLoading: boolean;
   requestHistory?: RequestHistoryEntry[];
   isReadOnly?: boolean;
+  searchTerm?: string;
+  searchOptions?: SearchOptions;
 }
 
 export const RequestPanel: React.FC<RequestPanelProps> = ({
@@ -52,6 +56,8 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   isLoading,
   requestHistory = [],
   isReadOnly = false,
+  searchTerm = '',
+  searchOptions = { caseSensitive: false, wholeWords: false, useRegex: false },
 }) => {
   const [activeTab, setActiveTab] = useState<'headers' | 'body' | 'auth' | 'scripts'>('headers');
   const [localRequest, setLocalRequest] = useState<ApiRequest | null>(null);
@@ -94,6 +100,12 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [rawBody, isJsonRaw]);
+
+  const renderHighlightedText = (text: string): React.ReactNode => {
+    if (!searchTerm.trim()) return text;
+    const matches = findMatches(text, searchTerm, searchOptions);
+    return highlightText(text, matches);
+  };
 
   if (!localRequest) {
     return (

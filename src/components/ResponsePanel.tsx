@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ApiResponse, SavedResponse } from '../types';
+import { SearchOptions } from './SearchBar';
+import { findMatches, highlightText } from '../utils/searchHighlight';
 
 interface ResponsePanelProps {
   response: ApiResponse | null;
@@ -7,6 +9,8 @@ interface ResponsePanelProps {
   isLoading: boolean;
   activeSavedResponse?: SavedResponse | null;
   onSaveResponse?: (name: string) => void;
+  searchTerm?: string;
+  searchOptions?: SearchOptions;
 }
 
 export const ResponsePanel: React.FC<ResponsePanelProps> = ({
@@ -15,6 +19,8 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
   isLoading,
   activeSavedResponse,
   onSaveResponse,
+  searchTerm = '',
+  searchOptions = { caseSensitive: false, wholeWords: false, useRegex: false },
 }) => {
   const [activeTab, setActiveTab] = useState<'response' | 'headers' | 'console'>('response');
   const [showSaveInput, setShowSaveInput] = useState(false);
@@ -166,6 +172,17 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
     const format = detectContentFormat(data, response.headers);
     const formatted = formatJsonResponse(data);
 
+    // Apply search highlighting if there's a search term
+    if (searchTerm.trim()) {
+      const matches = findMatches(formatted, searchTerm, searchOptions);
+      if (matches.length > 0) {
+        // For search results, show highlighted plain text instead of syntax highlighting
+        // to avoid conflicts between search highlighting and syntax highlighting
+        return <>{highlightText(formatted, matches)}</>;
+      }
+    }
+
+    // No search term or no matches, use syntax highlighting
     if (format === 'json') {
       return <>{highlightJson(formatted)}</>;
     }
@@ -173,6 +190,12 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
       return <>{highlightXml(formatted)}</>;
     }
     return formatted;
+  };
+
+  const renderHighlightedText = (text: string): React.ReactNode => {
+    if (!searchTerm.trim()) return text;
+    const matches = findMatches(text, searchTerm, searchOptions);
+    return highlightText(text, matches);
   };
 
   const getStatusClass = (status: number): string => {
@@ -430,8 +453,8 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
           <div>
             {Object.entries(response.headers).map(([key, value]) => (
               <div key={key} style={{ margin: '0.5rem 0', display: 'flex' }}>
-                <strong style={{ minWidth: '200px', color: '#0d7377' }}>{key}:</strong>
-                <span style={{ marginLeft: '1rem', wordBreak: 'break-all' }}>{value}</span>
+                <strong style={{ minWidth: '200px', color: '#0d7377' }}>{renderHighlightedText(key)}:</strong>
+                <span style={{ marginLeft: '1rem', wordBreak: 'break-all' }}>{renderHighlightedText(value)}</span>
               </div>
             ))}
           </div>
@@ -449,7 +472,7 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
                   <span style={{ color: '#888', marginRight: '0.5rem' }}>
                     [{new Date().toLocaleTimeString()}]
                   </span>
-                  {log}
+                  {renderHighlightedText(log)}
                 </div>
               ))
             )}

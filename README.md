@@ -26,6 +26,51 @@ A local API testing tool with git support - your Postman alternative.
 - **Saved responses** - Snapshot and name any response for future reference; saved responses are listed under their parent request in the sidebar
 - **Collection folders** - Group requests inside a collection; add folders manually or have them created automatically on OpenAPI import (one folder per tag); drag and drop to reorder and move requests between folders
 
+## Search and Find
+
+Search across all request and response content with powerful filtering options.
+
+### Opening Search
+
+- **Keyboard shortcut**: `Ctrl+F` (Windows/Linux) or `Cmd+F` (Mac)
+- Search bar appears in the top-right corner
+
+### Search Options
+
+- **Case Sensitive** (`Aa`): Treat "Test" and "test" as different
+- **Whole Words** (`|W|`): "test" won't match "testing" or "protest"
+- **Regular Expressions** (`.*`): Use regex patterns for advanced search
+
+### Search Examples
+
+**Basic Text Search:**
+- `token` - Find any occurrence of "token"
+- `user123` - Find exact text matches
+
+**Case Sensitive:**
+- `Bearer` (with Aa checked) - Only matches "Bearer", not "bearer"
+
+**Whole Words:**
+- `test` (with |W| checked) - Matches "test" but not "testing" or "protest"
+
+**Regex Patterns:**
+- `\d+` - Find any numbers (123, 456, etc.)
+- `user\d+` - Find "user" followed by digits (user123, user456)
+- `(get|post|put)` - Find any of these HTTP methods
+- `"[^"]*"` - Find any quoted strings
+- `\w+@\w+` - Find email-like patterns
+- `Bearer\s+\w+` - Find Bearer tokens with following token value
+- `https?://[^\s]+` - Find HTTP/HTTPS URLs
+
+### What Gets Searched
+
+Search covers all visible content:
+- **Request**: URL, headers, body content, auth details, scripts
+- **Response**: Response body, headers, console logs
+- **Saved responses**: All saved response content
+
+Search results are highlighted in yellow across all panels.
+
 ## Quick Start
 
 1. Install dependencies:
@@ -272,9 +317,9 @@ npm run dist         # Create distributable packages
 
 🚧 **Planned Features:**
 - UI Improvements
-    - Copy Response Output to clipboard
-    - Find (in request and response)
-    - Configurable Shortcut keys for UI 
+    - ✅ **Copy Response Output to clipboard** - Click the 📋 Copy button in any response to copy formatted output to clipboard
+    - ✅ **Find (in request and response)** - Press `Ctrl+F` / `Cmd+F` to search across all request and response content with regex support
+    - Configurable Shortcut keys for UI
         - e.g. "Send" (CMD 'Enter' / Ctrl 'Enter')
     - Image support in Response (Binary Data)
 - Collection runner (batch/sequential request execution)
