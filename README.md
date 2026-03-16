@@ -71,6 +71,42 @@ Search covers all visible content:
 
 Search results are highlighted in yellow across all panels.
 
+## Keyboard Shortcuts
+
+PostRebel includes configurable keyboard shortcuts for faster workflow.
+
+### Default Shortcuts
+
+- **Send Request**: `Cmd+Enter` (Mac) / `Ctrl+Enter` (Windows/Linux)
+- **Open Search**: `Cmd+F` (Mac) / `Ctrl+F` (Windows/Linux)
+- **New Request**: `Cmd+N` (Mac) / `Ctrl+N` (Windows/Linux) *(planned)*
+- **Save Response**: `Cmd+S` (Mac) / `Ctrl+S` (Windows/Linux) *(planned)*
+
+### Customizing Shortcuts
+
+1. Open **Settings** from the top menu bar (⚙️ icon)
+2. Scroll to the **Keyboard Shortcuts** section
+3. Click any shortcut to edit it
+4. Press your desired key combination
+5. Save settings and restart the app
+
+### Shortcut Guidelines
+
+- **Always use modifier keys**: Shortcuts must include at least one modifier (Ctrl, Cmd, Alt, Shift)
+- **Platform normalized**: Shortcuts automatically adapt to your platform (Cmd on Mac, Ctrl elsewhere)
+- **Conflict detection**: The system prevents duplicate shortcut assignments
+- **Context aware**: Shortcuts are ignored when typing in text fields
+
+### Examples
+
+**Send Request shortcut works when:**
+- You have an active request selected
+- An environment is selected
+- You're not currently typing in an input field
+- The request isn't already loading
+
+**Search shortcut works globally** except when typing in text fields.
+
 ## Quick Start
 
 1. Install dependencies:
@@ -319,8 +355,7 @@ npm run dist         # Create distributable packages
 - UI Improvements
     - ✅ **Copy Response Output to clipboard** - Click the 📋 Copy button in any response to copy formatted output to clipboard
     - ✅ **Find (in request and response)** - Press `Ctrl+F` / `Cmd+F` to search across all request and response content with regex support
-    - Configurable Shortcut keys for UI
-        - e.g. "Send" (CMD 'Enter' / Ctrl 'Enter')
+    - ✅ **Configurable Shortcut keys for UI** - Customizable keyboard shortcuts including Send request (`Cmd+Enter`/`Ctrl+Enter`), configurable in Settings
     - Image support in Response (Binary Data)
 - Collection runner (batch/sequential request execution)
 - Collection export (Postman v2, OpenAPI)

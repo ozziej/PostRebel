@@ -12,6 +12,7 @@ import { WorkspaceManager } from './components/WorkspaceManager';
 import { SettingsModal } from './components/SettingsModal';
 import { ImportModal, ImportTab } from './components/ImportModal';
 import { SearchBar, SearchOptions } from './components/SearchBar';
+import { DEFAULT_SHORTCUTS, KeyboardShortcut, matchesShortcut } from './utils/keyboardShortcuts';
 import { HttpService } from './utils/httpService';
 import { ScriptRunner } from './utils/scriptRunner';
 import './App.css';
@@ -42,6 +43,7 @@ function App() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchOptions, setSearchOptions] = useState<SearchOptions>({ caseSensitive: false, wholeWords: false, useRegex: false });
+  const [shortcuts, setShortcuts] = useState<KeyboardShortcut[]>(DEFAULT_SHORTCUTS);
   const savedPrefsRef = useRef<{ activeWorkspaceId?: string; activeEnvironmentId?: string }>({});
 
   useEffect(() => {
@@ -52,6 +54,16 @@ function App() {
         if (result.success && result.settings) {
           const s = result.settings;
           if (s.sidebarWidth) setSidebarWidth(s.sidebarWidth);
+
+          // Load keyboard shortcuts
+          if (s.keyboardShortcuts && Array.isArray(s.keyboardShortcuts)) {
+            const mergedShortcuts = DEFAULT_SHORTCUTS.map(defaultShortcut => {
+              const saved = s.keyboardShortcuts.find((saved: KeyboardShortcut) => saved.id === defaultShortcut.id);
+              return saved ? { ...defaultShortcut, currentKey: saved.currentKey } : defaultShortcut;
+            });
+            setShortcuts(mergedShortcuts);
+          }
+
           savedPrefsRef.current = {
             activeWorkspaceId: s.activeWorkspaceId,
             activeEnvironmentId: s.activeEnvironmentId,
@@ -71,19 +83,6 @@ function App() {
     }
   }, [activeWorkspace]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+F or Cmd+F to open search
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault();
-        setIsSearchOpen(true);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   const loadWorkspaces = async () => {
     try {
@@ -645,6 +644,39 @@ function App() {
       setIsLoading(false);
     }
   };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle shortcuts when typing in inputs
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true') {
+        return;
+      }
+
+      const searchShortcut = shortcuts.find(s => s.id === 'open-search');
+      const sendShortcut = shortcuts.find(s => s.id === 'send-request');
+
+      // Open search shortcut
+      if (searchShortcut && matchesShortcut(e, searchShortcut.currentKey)) {
+        e.preventDefault();
+        setIsSearchOpen(true);
+        return;
+      }
+
+      // Send request shortcut (only when there's an active request and not loading)
+      if (sendShortcut && matchesShortcut(e, sendShortcut.currentKey)) {
+        if (activeRequest && !isLoading && activeEnvironment) {
+          e.preventDefault();
+          executeRequest(activeRequest);
+          return;
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [shortcuts, activeRequest, isLoading, activeEnvironment, executeRequest]);
 
   return (
     <div className="app">
