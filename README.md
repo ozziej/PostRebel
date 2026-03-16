@@ -271,6 +271,12 @@ npm run dist         # Create distributable packages
 ## Roadmap
 
 🚧 **Planned Features:**
+- UI Improvements
+    - Copy Response Output to clipboard
+    - Find (in request and response)
+    - Configurable Shortcut keys for UI 
+        - e.g. "Send" (CMD 'Enter' / Ctrl 'Enter')
+    - Image support in Response (Binary Data)
 - Collection runner (batch/sequential request execution)
 - Collection export (Postman v2, OpenAPI)
 - Import/export workspaces

@@ -219,6 +219,27 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
     setShowSaveInput(false);
   };
 
+  const handleCopyResponse = async () => {
+    if (!response) return;
+
+    try {
+      const formattedData = formatJsonResponse(response.data);
+      await navigator.clipboard.writeText(formattedData);
+      // TODO: Add toast notification for success feedback
+      console.log('Response copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy response:', error);
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = formatJsonResponse(response.data);
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      console.log('Response copied to clipboard (fallback method)');
+    }
+  };
+
   return (
     <div className="response-panel">
       {activeSavedResponse && (
@@ -243,46 +264,56 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
           </span>
           {response.time > 0 && <span>{response.time}ms</span>}
           {response.size > 0 && <span>{response.size} bytes</span>}
-          {onSaveResponse && !activeSavedResponse && (
-            showSaveInput ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: 'auto' }}>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Response name..."
-                  value={saveInputName}
-                  onChange={(e) => setSaveInputName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSaveConfirm();
-                    if (e.key === 'Escape') { setShowSaveInput(false); setSaveInputName(''); }
-                  }}
-                  style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem', width: '160px' }}
-                  autoFocus
-                />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: 'auto' }}>
+            <button
+              onClick={handleCopyResponse}
+              className="button-secondary button"
+              style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+              title="Copy response to clipboard"
+            >
+              📋 Copy
+            </button>
+            {onSaveResponse && !activeSavedResponse && (
+              showSaveInput ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Response name..."
+                    value={saveInputName}
+                    onChange={(e) => setSaveInputName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveConfirm();
+                      if (e.key === 'Escape') { setShowSaveInput(false); setSaveInputName(''); }
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem', width: '160px' }}
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSaveConfirm}
+                    className="button"
+                    style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem' }}
+                    title="Confirm save"
+                  >✓</button>
+                  <button
+                    onClick={() => { setShowSaveInput(false); setSaveInputName(''); }}
+                    className="button-secondary button"
+                    style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem' }}
+                    title="Cancel"
+                  >✗</button>
+                </div>
+              ) : (
                 <button
-                  onClick={handleSaveConfirm}
-                  className="button"
-                  style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem' }}
-                  title="Confirm save"
-                >✓</button>
-                <button
-                  onClick={() => { setShowSaveInput(false); setSaveInputName(''); }}
+                  onClick={() => setShowSaveInput(true)}
                   className="button-secondary button"
-                  style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem' }}
-                  title="Cancel"
-                >✗</button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowSaveInput(true)}
-                className="button-secondary button"
-                style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', marginLeft: 'auto' }}
-                title="Save this response"
-              >
-                💾 Save
-              </button>
-            )
-          )}
+                  style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                  title="Save this response"
+                >
+                  💾 Save
+                </button>
+              )
+            )}
+          </div>
         </div>
 
         <div className="request-tabs" style={{ marginTop: '1rem' }}>
