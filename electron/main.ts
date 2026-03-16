@@ -1035,15 +1035,37 @@ ipcMain.handle('execute-http-request', async (event, requestConfig) => {
       httpsAgent,
       // Important: This allows axios to work in Node.js without CORS
       maxRedirects: 5,
-      validateStatus: () => true // Accept all status codes
+      validateStatus: () => true, // Accept all status codes
+      responseType: 'arraybuffer'  // Always receive raw bytes; we decode below
     };
 
     const response = await axios(config);
     const endTime = Date.now();
 
+    const contentType: string = (response.headers['content-type'] || '').toLowerCase();
+    const rawBuffer: Buffer = Buffer.from(response.data);
+    const byteSize = rawBuffer.length;
+
+    // Decode response data appropriately for IPC (which cannot carry raw Buffers)
+    let responseData: any;
+    if (contentType.includes('image/') || contentType.includes('application/octet-stream')) {
+      // Binary: send as base64 string so the renderer can build a data URL
+      responseData = rawBuffer.toString('base64');
+    } else {
+      // Text / JSON: decode as UTF-8 string then attempt JSON parse
+      const text = rawBuffer.toString('utf8');
+      if (contentType.includes('application/json') || contentType.includes('+json')) {
+        try { responseData = JSON.parse(text); } catch { responseData = text; }
+      } else {
+        responseData = text;
+      }
+    }
+
     console.log('[Main Process] Request completed:', {
       status: response.status,
       statusText: response.statusText,
+      contentType,
+      byteSize,
       time: endTime - startTime
     });
 
@@ -1053,9 +1075,9 @@ ipcMain.handle('execute-http-request', async (event, requestConfig) => {
         status: response.status,
         statusText: response.statusText,
         headers: response.headers,
-        data: response.data,
+        data: responseData,
         time: endTime - startTime,
-        size: JSON.stringify(response.data).length
+        size: byteSize
       }
     };
 

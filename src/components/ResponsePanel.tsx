@@ -25,10 +25,57 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
   const [activeTab, setActiveTab] = useState<'response' | 'headers' | 'console'>('response');
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [saveInputName, setSaveInputName] = useState('');
+  const [imageDataUrl, setImageDataUrl] = useState<string>('');
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState<string>('');
 
   useEffect(() => {
     setShowSaveInput(false);
     setSaveInputName('');
+    setImageDataUrl('');
+    setImageError('');
+  }, [response]);
+
+  // Handle image data loading when response changes
+  useEffect(() => {
+    if (!response) return;
+
+    const format = detectContentFormat(response.data, response.headers);
+    if (format !== 'image') {
+      setImageDataUrl('');
+      setImageError('');
+      return;
+    }
+
+    const contentType = Object.entries(response.headers).find(
+      ([k]) => k.toLowerCase() === 'content-type'
+    )?.[1] || 'image/png';
+
+    console.log('[Image Loading] Starting image data processing...');
+    setImageLoading(true);
+    setImageError('');
+
+    // Handle data URL format (already ready)
+    if (typeof response.data === 'string' && response.data.startsWith('data:image/')) {
+      setImageDataUrl(response.data);
+      setImageLoading(false);
+      console.log('[Image Loading] Using existing data URL');
+      return;
+    }
+
+    // Process binary data asynchronously
+    createImageDataUrl(response.data, contentType)
+      .then((dataUrl) => {
+        console.log('[Image Loading] Successfully created data URL');
+        setImageDataUrl(dataUrl);
+        setImageLoading(false);
+      })
+      .catch((error) => {
+        console.error('[Image Loading] Failed to create data URL:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        setImageError(errorMessage);
+        setImageLoading(false);
+      });
   }, [response]);
 
   const formatJsonResponse = (data: any): string => {
@@ -148,10 +195,13 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
     return nodes;
   };
 
-  const detectContentFormat = (data: any, headers: Record<string, string>): 'json' | 'xml' | 'text' => {
+  const detectContentFormat = (data: any, headers: Record<string, string>): 'json' | 'xml' | 'text' | 'image' => {
     const contentType = Object.entries(headers).find(
       ([k]) => k.toLowerCase() === 'content-type'
     )?.[1] || '';
+
+    // Check for image content types
+    if (contentType.includes('image/')) return 'image';
 
     if (contentType.includes('json')) return 'json';
     if (contentType.includes('xml')) return 'xml';
@@ -164,12 +214,40 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
     }
     if (dataStr.trim().startsWith('<')) return 'xml';
 
+    // Check for base64 image data patterns
+    if (typeof data === 'string') {
+      // Base64 image data URL pattern
+      if (data.startsWith('data:image/')) return 'image';
+
+      // Check for base64 encoded binary that might be an image
+      if (data.length > 100 && /^[A-Za-z0-9+/=]+$/.test(data)) {
+        // Try to detect image headers in base64 data
+        try {
+          const binaryString = atob(data.substring(0, 40));
+          // Check for common image file signatures
+          if (binaryString.startsWith('\x89PNG') || // PNG
+              binaryString.startsWith('\xFF\xD8\xFF') || // JPEG
+              binaryString.startsWith('GIF87a') || binaryString.startsWith('GIF89a') || // GIF
+              binaryString.startsWith('RIFF') || // WebP (contains WEBP later)
+              binaryString.includes('<svg')) { // SVG
+            return 'image';
+          }
+        } catch {}
+      }
+    }
+
     return 'text';
   };
 
   const renderHighlightedResponse = (data: any): React.ReactNode => {
     if (!response) return null;
     const format = detectContentFormat(data, response.headers);
+
+    // Handle image format
+    if (format === 'image') {
+      return renderImageResponse();
+    }
+
     const formatted = formatJsonResponse(data);
 
     // Apply search highlighting if there's a search term
@@ -196,6 +274,158 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
     if (!searchTerm.trim()) return text;
     const matches = findMatches(text, searchTerm, searchOptions);
     return highlightText(text, matches);
+  };
+
+  // Convert image data to a data URL.
+  // The Electron main process always sends base64 strings for image responses.
+  const createImageDataUrl = (data: any, contentType: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      try {
+        if (typeof data === 'string') {
+          if (data.startsWith('data:')) {
+            // Already a full data URL
+            resolve(data);
+          } else {
+            // Base64 string from main process — build the data URL directly
+            resolve(`data:${contentType};base64,${data}`);
+          }
+        } else {
+          reject(new Error(`Unexpected image data type: ${typeof data}`));
+        }
+      } catch (error) {
+        reject(error);
+      }
+    });
+  };
+
+  const renderImageResponse = (): React.ReactNode => {
+    if (!response) return null;
+
+    const contentType = Object.entries(response.headers).find(
+      ([k]) => k.toLowerCase() === 'content-type'
+    )?.[1] || '';
+
+    const formatMatch = contentType.match(/image\/(\w+)/);
+    const imageName = formatMatch ? `response-image.${formatMatch[1]}` : 'response-image';
+
+    if (imageLoading) {
+      return (
+        <div style={{ textAlign: 'center', padding: '3rem', color: '#666' }}>
+          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⏳</div>
+          <div>Loading image...</div>
+        </div>
+      );
+    }
+
+    if (imageError) {
+      return (
+        <div style={{
+          padding: '2rem',
+          textAlign: 'center',
+          color: '#ef4444',
+          backgroundColor: '#2d1a1a',
+          border: '1px solid #ef4444',
+          borderRadius: '4px'
+        }}>
+          <div style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>❌</div>
+          <div>Error processing image data</div>
+          <div style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.5rem' }}>{imageError}</div>
+        </div>
+      );
+    }
+
+    if (!imageDataUrl) return null;
+
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1rem',
+        padding: '1rem',
+        backgroundColor: '#1a1a1a',
+        borderRadius: '4px'
+      }}>
+        {/* Image Controls */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          padding: '0.5rem',
+          backgroundColor: '#2d2d2d',
+          borderRadius: '4px',
+          fontSize: '0.8rem'
+        }}>
+          <span style={{ color: '#0d9e9e', marginRight: '0.5rem' }}>🖼️</span>
+          <span style={{ color: '#ccc' }}>
+            {contentType || 'image'} • {response.size > 0 ? `${(response.size / 1024).toFixed(1)} KB` : 'Unknown size'}
+          </span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
+            <button
+              onClick={() => {
+                const link = document.createElement('a');
+                link.href = imageDataUrl;
+                link.download = imageName;
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              }}
+              className="button-secondary button"
+              style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem' }}
+              title="Download image"
+            >
+              💾 Download
+            </button>
+            <button
+              onClick={() => {
+                const img = document.getElementById('response-image') as HTMLImageElement;
+                if (img) {
+                  if (img.style.maxWidth === 'none') {
+                    img.style.maxWidth = '100%';
+                    img.style.maxHeight = '500px';
+                  } else {
+                    img.style.maxWidth = 'none';
+                    img.style.maxHeight = 'none';
+                  }
+                }
+              }}
+              className="button-secondary button"
+              style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem' }}
+              title="Toggle actual size"
+            >
+              🔍 Actual Size
+            </button>
+          </div>
+        </div>
+
+        {/* Image Display */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '200px',
+          backgroundColor: '#111',
+          borderRadius: '4px',
+          overflow: 'auto',
+          border: '1px solid #404040'
+        }}>
+          <img
+            id="response-image"
+            src={imageDataUrl}
+            alt="API Response"
+            style={{
+              maxWidth: '100%',
+              maxHeight: '500px',
+              objectFit: 'contain',
+            }}
+            onLoad={(e) => {
+              const target = e.target as HTMLImageElement;
+              console.log(`[Image] Loaded: ${target.naturalWidth}x${target.naturalHeight}`);
+            }}
+          />
+        </div>
+      </div>
+    );
   };
 
   const getStatusClass = (status: number): string => {

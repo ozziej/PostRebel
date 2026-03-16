@@ -25,6 +25,10 @@ A local API testing tool with git support - your Postman alternative.
 - **Request history** - Per-request execution log showing status, timing, and size; persisted per workspace and auto-pruned to a configurable maximum
 - **Saved responses** - Snapshot and name any response for future reference; saved responses are listed under their parent request in the sidebar
 - **Collection folders** - Group requests inside a collection; add folders manually or have them created automatically on OpenAPI import (one folder per tag); drag and drop to reorder and move requests between folders
+- **Copy response** - Copy the full formatted response body to the clipboard with one click (📋 Copy button)
+- **Find in request/response** - `Cmd+F` / `Ctrl+F` searches across all request and response content with plain text, case-sensitive, whole-word, and regex modes
+- **Keyboard shortcuts** - Configurable shortcuts for common actions (Send: `Cmd+Enter` / `Ctrl+Enter`); customise in Settings
+- **Image responses** - APIs that return images (`image/*`) display the image inline with download and actual-size controls
 
 ## Search and Find
 
@@ -106,6 +110,71 @@ PostRebel includes configurable keyboard shortcuts for faster workflow.
 - The request isn't already loading
 
 **Search shortcut works globally** except when typing in text fields.
+
+## Image Response Support
+
+PostRebel automatically detects and displays images returned by API responses.
+
+### Supported Image Formats
+
+Any format the browser can render is supported, including:
+
+- **PNG** - Portable Network Graphics
+- **JPEG/JPG** - Joint Photographic Experts Group
+- **GIF** - Graphics Interchange Format (including animated GIFs)
+- **WebP** - Modern web image format
+- **SVG** - Scalable Vector Graphics
+- **BMP** - Bitmap images
+
+### Automatic Detection
+
+Images are detected via the response `Content-Type` header — any `image/*` MIME type triggers the image viewer automatically. The underlying HTTP client always receives the raw bytes, which are safely converted to base64 before being handed to the renderer, so binary data is never corrupted in transit.
+
+### Image Controls
+
+When an image response is detected, you'll see:
+- **Image preview** with constrained sizing (fits within the panel, max 500px tall)
+- **File information** showing the MIME type and exact file size in KB
+- **Download button** (💾) — saves the image to your device using the correct file extension
+- **Actual Size toggle** (🔍) — switches between fitted view and the image's true pixel dimensions
+
+### Use Cases
+
+Perfect for testing APIs that return:
+- **Generated images** (AI art, charts, QR codes, barcodes)
+- **Profile pictures** or avatars
+- **Screenshots** or captures
+- **Processed images** (thumbnails, watermarked or resized images)
+- **Dynamic graphics** (server-rendered charts, maps, diagrams)
+- **Binary image data** from file upload/processing endpoints
+
+### Example Requests
+
+```
+GET https://picsum.photos/400/300
+```
+Returns a random placeholder JPEG — good for a quick smoke test.
+
+```
+GET https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=Hello
+```
+Returns a PNG QR code for the text "Hello".
+
+```
+POST https://quickchart.io/chart
+Content-Type: application/json
+
+{
+  "chart": {
+    "type": "bar",
+    "data": {
+      "labels": ["Q1", "Q2", "Q3", "Q4"],
+      "datasets": [{ "data": [50, 60, 70, 180] }]
+    }
+  }
+}
+```
+Returns a server-rendered bar chart as a PNG.
 
 ## Quick Start
 
@@ -356,7 +425,7 @@ npm run dist         # Create distributable packages
     - ✅ **Copy Response Output to clipboard** - Click the 📋 Copy button in any response to copy formatted output to clipboard
     - ✅ **Find (in request and response)** - Press `Ctrl+F` / `Cmd+F` to search across all request and response content with regex support
     - ✅ **Configurable Shortcut keys for UI** - Customizable keyboard shortcuts including Send request (`Cmd+Enter`/`Ctrl+Enter`), configurable in Settings
-    - Image support in Response (Binary Data)
+    - ✅ **Image support in Response (Binary Data)** - View images directly in response panel with download and zoom controls
 - Collection runner (batch/sequential request execution)
 - Collection export (Postman v2, OpenAPI)
 - Import/export workspaces
