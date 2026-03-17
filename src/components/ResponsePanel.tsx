@@ -78,6 +78,55 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
       });
   }, [response]);
 
+  const serializeXmlNode = (node: Node, indent: number): string => {
+    const spaces = '  '.repeat(indent);
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent?.trim() || '';
+    }
+    if (node.nodeType === Node.COMMENT_NODE) {
+      return `${spaces}<!--${node.textContent}-->`;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+    const el = node as Element;
+    const attrs = Array.from(el.attributes).map(a => `${a.name}="${a.value}"`).join(' ');
+    const attrStr = attrs ? ` ${attrs}` : '';
+    const tagName = el.tagName;
+
+    const childNodes = Array.from(el.childNodes).filter(n =>
+      n.nodeType !== Node.TEXT_NODE || (n.textContent?.trim() || '') !== ''
+    );
+
+    if (childNodes.length === 0) {
+      return `${spaces}<${tagName}${attrStr}/>`;
+    }
+    if (childNodes.length === 1 && childNodes[0].nodeType === Node.TEXT_NODE) {
+      const text = childNodes[0].textContent?.trim() || '';
+      return `${spaces}<${tagName}${attrStr}>${text}</${tagName}>`;
+    }
+
+    const childLines = childNodes.map(child => serializeXmlNode(child, indent + 1)).filter(Boolean);
+    return `${spaces}<${tagName}${attrStr}>\n${childLines.join('\n')}\n${spaces}</${tagName}>`;
+  };
+
+  const formatXmlResponse = (data: any): string => {
+    const xmlStr = typeof data === 'string' ? data : String(data);
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlStr, 'application/xml');
+      if (doc.querySelector('parsererror')) return xmlStr;
+
+      let result = '';
+      const declMatch = xmlStr.trim().match(/^<\?xml[^?]*\?>/);
+      if (declMatch) result = declMatch[0] + '\n';
+      result += serializeXmlNode(doc.documentElement, 0);
+      return result;
+    } catch {
+      return xmlStr;
+    }
+  };
+
   const formatJsonResponse = (data: any): string => {
     try {
       if (typeof data === 'string') {
@@ -248,7 +297,7 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
       return renderImageResponse();
     }
 
-    const formatted = formatJsonResponse(data);
+    const formatted = format === 'xml' ? formatXmlResponse(data) : formatJsonResponse(data);
 
     // Apply search highlighting if there's a search term
     if (searchTerm.trim()) {
@@ -476,15 +525,17 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
     if (!response) return;
 
     try {
-      const formattedData = formatJsonResponse(response.data);
+      const fmt = detectContentFormat(response.data, response.headers);
+      const formattedData = fmt === 'xml' ? formatXmlResponse(response.data) : formatJsonResponse(response.data);
       await navigator.clipboard.writeText(formattedData);
       // TODO: Add toast notification for success feedback
       console.log('Response copied to clipboard');
     } catch (error) {
       console.error('Failed to copy response:', error);
       // Fallback for older browsers
+      const fmt = detectContentFormat(response.data, response.headers);
       const textArea = document.createElement('textarea');
-      textArea.value = formatJsonResponse(response.data);
+      textArea.value = fmt === 'xml' ? formatXmlResponse(response.data) : formatJsonResponse(response.data);
       document.body.appendChild(textArea);
       textArea.select();
       document.execCommand('copy');
