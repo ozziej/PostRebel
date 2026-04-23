@@ -13,6 +13,7 @@ interface SidebarProps {
   onSaveCollection: (collection: Collection) => Promise<any>;
   onDeleteCollection: (collectionId: string) => Promise<any>;
   onDeleteRequest: (collectionId: string, requestId: string) => Promise<any>;
+  onEditCollectionAuth: (collection: Collection) => void;
 }
 
 interface DragItem {
@@ -40,6 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSaveCollection,
   onDeleteCollection,
   onDeleteRequest,
+  onEditCollectionAuth,
 }) => {
   const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
   const [expandedRequests, setExpandedRequests] = useState<Set<string>>(new Set());
@@ -113,7 +115,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       url: 'https://api.example.com',
       headers: {
         'Content-Type': 'application/json'
-      }
+      },
+      // Set inherit as default if collection has auth configured
+      auth: collection.auth ? { type: 'inherit' } : undefined
     };
 
     const updatedCollection = {
@@ -607,6 +611,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </button>
 
+
               <div style={{ display: 'flex', gap: '0.25rem' }}>
                 {editingCollection === collection.id ? (
                   <>
@@ -667,6 +672,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       title="Rename collection"
                     >
                       ✏️
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditCollectionAuth(collection);
+                      }}
+                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                      className="button-secondary button"
+                      title="Edit collection authentication"
+                    >
+                      🔐
                     </button>
                     <button
                       onClick={(e) => {

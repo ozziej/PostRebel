@@ -20,7 +20,7 @@ export interface ApiRequest {
     binaryFileName?: string;
   };
   auth?: {
-    type: 'none' | 'bearer' | 'basic' | 'jwt';
+    type: 'none' | 'bearer' | 'basic' | 'jwt' | 'inherit';
     bearer?: string;
     basic?: { username: string; password: string };
     jwt?: string;
@@ -40,6 +40,12 @@ export interface Collection {
   name: string;
   requests: ApiRequest[];
   folders?: CollectionFolder[];
+  auth?: {
+    type: 'none' | 'bearer' | 'basic' | 'jwt';
+    bearer?: string;
+    basic?: { username: string; password: string };
+    jwt?: string;
+  };
 }
 
 export interface EnvironmentVariable {

@@ -10,6 +10,7 @@ interface VariableInputProps {
   className?: string;
   style?: React.CSSProperties;
   multiline?: boolean;
+  disabled?: boolean;
 }
 
 interface TooltipState {
@@ -36,7 +37,8 @@ export const VariableInput: React.FC<VariableInputProps> = ({
   placeholder,
   className,
   style,
-  multiline = false
+  multiline = false,
+  disabled = false
 }) => {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -424,6 +426,7 @@ export const VariableInput: React.FC<VariableInputProps> = ({
     onMouseLeave: handleMouseLeave,
     placeholder,
     className,
+    disabled,
     style: {
       ...style,
       backgroundColor: hasVariables ? '#1a2d2d' : style?.backgroundColor,

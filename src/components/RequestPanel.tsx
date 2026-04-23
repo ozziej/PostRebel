@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ApiRequest, Environment, RequestHistoryEntry } from '../types';
+import { ApiRequest, Environment, RequestHistoryEntry, Collection } from '../types';
 import { KeyValueEditor } from './KeyValueEditor';
 import { VariableInput } from './VariableInput';
 import { SearchOptions } from './SearchBar';
@@ -37,6 +37,7 @@ function statusColor(status: number): string {
 interface RequestPanelProps {
   request: ApiRequest | null;
   environment: Environment | null;
+  activeCollection: Collection | null;
   onExecute: (request: ApiRequest) => void;
   onRequestChange: (request: ApiRequest) => void;
   onUpdateVariable?: (varName: string, newValue: string) => void;
@@ -50,6 +51,7 @@ interface RequestPanelProps {
 export const RequestPanel: React.FC<RequestPanelProps> = ({
   request,
   environment,
+  activeCollection,
   onExecute,
   onRequestChange,
   onUpdateVariable,
@@ -559,6 +561,13 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                 });
               }}
             >
+              {activeCollection?.auth && (
+                <option value="inherit">
+                  Inherit from Collection ({activeCollection.auth.type === 'bearer' ? 'Bearer Token' :
+                                          activeCollection.auth.type === 'basic' ? 'Basic Auth' :
+                                          activeCollection.auth.type === 'jwt' ? 'JWT' : 'No Auth'})
+                </option>
+              )}
               <option value="none">No Auth</option>
               <option value="bearer">Bearer Token</option>
               <option value="basic">Basic Auth</option>
@@ -636,6 +645,84 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                 placeholder="{{jwt_token}} or paste JWT here"
                 className="form-input"
               />
+            </div>
+          )}
+
+          {localRequest.auth?.type === 'inherit' && activeCollection?.auth && (
+            <div style={{ backgroundColor: '#f8f9fa', padding: '1rem', borderRadius: '0.5rem', border: '1px solid #e9ecef' }}>
+              <div style={{ fontSize: '0.9rem', color: '#6c757d', marginBottom: '1rem', fontStyle: 'italic' }}>
+                Using authentication from collection "{activeCollection.name}"
+              </div>
+
+              {activeCollection.auth.type === 'bearer' && (
+                <div className="form-group">
+                  <label>Bearer Token (inherited)</label>
+                  <VariableInput
+                    value={activeCollection.auth.bearer || ''}
+                    onChange={() => {}} // Read-only
+                    environment={environment}
+                    onUpdateVariable={onUpdateVariable}
+                    placeholder="{{token}} or paste token here"
+                    className="form-input"
+                    style={{ backgroundColor: '#f8f9fa', cursor: 'not-allowed' }}
+                    disabled
+                  />
+                  <small style={{ color: '#6c757d', fontSize: '0.8rem' }}>
+                    To edit this value, use the 🔐 button on the collection in the sidebar
+                  </small>
+                </div>
+              )}
+
+              {activeCollection.auth.type === 'basic' && (
+                <>
+                  <div className="form-group">
+                    <label>Username (inherited)</label>
+                    <VariableInput
+                      value={activeCollection.auth.basic?.username || ''}
+                      onChange={() => {}} // Read-only
+                      environment={environment}
+                      onUpdateVariable={onUpdateVariable}
+                      className="form-input"
+                      style={{ backgroundColor: '#f8f9fa', cursor: 'not-allowed' }}
+                      disabled
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Password (inherited)</label>
+                    <VariableInput
+                      value={activeCollection.auth.basic?.password || ''}
+                      onChange={() => {}} // Read-only
+                      environment={environment}
+                      onUpdateVariable={onUpdateVariable}
+                      className="form-input"
+                      style={{ backgroundColor: '#f8f9fa', cursor: 'not-allowed' }}
+                      disabled
+                    />
+                  </div>
+                  <small style={{ color: '#6c757d', fontSize: '0.8rem' }}>
+                    To edit these values, use the 🔐 button on the collection in the sidebar
+                  </small>
+                </>
+              )}
+
+              {activeCollection.auth.type === 'jwt' && (
+                <div className="form-group">
+                  <label>JWT Token (inherited)</label>
+                  <VariableInput
+                    value={activeCollection.auth.jwt || ''}
+                    onChange={() => {}} // Read-only
+                    environment={environment}
+                    onUpdateVariable={onUpdateVariable}
+                    placeholder="{{jwt_token}} or paste JWT here"
+                    className="form-input"
+                    style={{ backgroundColor: '#f8f9fa', cursor: 'not-allowed' }}
+                    disabled
+                  />
+                  <small style={{ color: '#6c757d', fontSize: '0.8rem' }}>
+                    To edit this value, use the 🔐 button on the collection in the sidebar
+                  </small>
+                </div>
+              )}
             </div>
           )}
         </div>

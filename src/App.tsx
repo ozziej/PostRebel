@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace, RequestHistoryEntry, SavedResponse } from './types';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
+import { CollectionAuthModal } from './components/CollectionAuthModal';
 import { ResizableSidebar } from './components/ResizableSidebar';
 import { RequestPanel } from './components/RequestPanel';
 import { ResponsePanel } from './components/ResponsePanel';
@@ -36,6 +37,8 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importModalTab, setImportModalTab] = useState<ImportTab>('collection');
+  const [showCollectionAuthModal, setShowCollectionAuthModal] = useState(false);
+  const [editingCollectionAuth, setEditingCollectionAuth] = useState<Collection | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [requestHistory, setRequestHistory] = useState<RequestHistoryEntry[]>([]);
   const [savedResponses, setSavedResponses] = useState<SavedResponse[]>([]);
@@ -438,6 +441,16 @@ function App() {
     console.log('[App] Imported environment:', environment.name);
   };
 
+  const handleEditCollectionAuth = (collection: Collection) => {
+    setEditingCollectionAuth(collection);
+    setShowCollectionAuthModal(true);
+  };
+
+  const handleCloseCollectionAuthModal = () => {
+    setShowCollectionAuthModal(false);
+    setEditingCollectionAuth(null);
+  };
+
   const handleImportCurl = async (
     request: ApiRequest,
     collectionId: string | null,
@@ -561,7 +574,11 @@ function App() {
       }
 
       // Make the HTTP request
-      const response = await HttpService.executeRequest(request, activeEnvironment, certificates);
+      const activeCollection = collections.find(c =>
+        c.requests.some(r => r.id === request.id) ||
+        c.folders?.some(f => f.requests.some(r => r.id === request.id))
+      ) || null;
+      const response = await HttpService.executeRequest(request, activeEnvironment, certificates, activeCollection);
       setCurrentResponse(response);
       setResponseCache(prev => ({ ...prev, [request.id]: response }));
 
@@ -714,6 +731,7 @@ function App() {
             onSaveCollection={saveCollection}
             onDeleteCollection={deleteCollection}
             onDeleteRequest={deleteRequest}
+            onEditCollectionAuth={handleEditCollectionAuth}
           />
         </ResizableSidebar>
 
@@ -721,6 +739,10 @@ function App() {
         <RequestPanel
           request={activeRequest}
           environment={activeEnvironment}
+          activeCollection={collections.find(c =>
+            c.requests.some(r => r.id === activeRequest?.id) ||
+            c.folders?.some(f => f.requests.some(r => r.id === activeRequest?.id))
+          ) || null}
           onExecute={executeRequest}
           onRequestChange={handleRequestChange}
           onUpdateVariable={handleUpdateVariable}
@@ -794,6 +816,15 @@ function App() {
         onImportEnvironment={handleImportEnvironment}
         onImportCurl={handleImportCurl}
         onImportOpenApi={handleImportOpenApi}
+      />
+
+      <CollectionAuthModal
+        collection={editingCollectionAuth}
+        isOpen={showCollectionAuthModal}
+        environment={activeEnvironment || { id: '', name: '', variables: {} }}
+        onClose={handleCloseCollectionAuthModal}
+        onSave={saveCollection}
+        onUpdateVariable={handleUpdateVariable}
       />
     </div>
   );

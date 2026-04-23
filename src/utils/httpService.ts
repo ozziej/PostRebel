@@ -1,4 +1,4 @@
-import { ApiRequest, ApiResponse, Environment, Certificate } from '../types';
+import { ApiRequest, ApiResponse, Environment, Certificate, Collection } from '../types';
 
 export class HttpService {
   private static replaceVariables(text: string, environment: Environment): string {
@@ -10,7 +10,8 @@ export class HttpService {
   static async executeRequest(
     request: ApiRequest,
     environment: Environment,
-    certificates: Certificate[] = []
+    certificates: Certificate[] = [],
+    collection: Collection | null = null
   ): Promise<ApiResponse> {
     const startTime = Date.now();
 
@@ -26,23 +27,30 @@ export class HttpService {
         headers[key] = this.replaceVariables(value, environment);
       });
 
+      // Resolve inherited authentication
+      let effectiveAuth = request.auth;
+      if (request.auth?.type === 'inherit' && collection?.auth) {
+        effectiveAuth = collection.auth;
+        console.log('[HTTP Service] Using inherited auth from collection:', effectiveAuth.type);
+      }
+
       // Add authentication
-      if (request.auth) {
-        switch (request.auth.type) {
+      if (effectiveAuth) {
+        switch (effectiveAuth.type) {
           case 'bearer':
-            const token = this.replaceVariables(request.auth.bearer || '', environment);
+            const token = this.replaceVariables(effectiveAuth.bearer || '', environment);
             headers['Authorization'] = `Bearer ${token}`;
             break;
           case 'basic':
-            if (request.auth.basic) {
-              const username = this.replaceVariables(request.auth.basic.username, environment);
-              const password = this.replaceVariables(request.auth.basic.password, environment);
+            if (effectiveAuth.basic) {
+              const username = this.replaceVariables(effectiveAuth.basic.username, environment);
+              const password = this.replaceVariables(effectiveAuth.basic.password, environment);
               const credentials = btoa(`${username}:${password}`);
               headers['Authorization'] = `Basic ${credentials}`;
             }
             break;
           case 'jwt':
-            const jwtToken = this.replaceVariables(request.auth.jwt || '', environment);
+            const jwtToken = this.replaceVariables(effectiveAuth.jwt || '', environment);
             headers['Authorization'] = `JWT ${jwtToken}`;
             break;
         }
