@@ -35,7 +35,8 @@ export class HttpService {
             break;
           case 'basic':
             if (request.auth.basic) {
-              const { username, password } = request.auth.basic;
+              const username = this.replaceVariables(request.auth.basic.username, environment);
+              const password = this.replaceVariables(request.auth.basic.password, environment);
               const credentials = btoa(`${username}:${password}`);
               headers['Authorization'] = `Basic ${credentials}`;
             }
