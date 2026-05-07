@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ApiResponse, SavedResponse } from '../types';
 import { SearchOptions } from './SearchBar';
 import { findMatches, highlightText } from '../utils/searchHighlight';
@@ -11,6 +11,8 @@ interface ResponsePanelProps {
   onSaveResponse?: (name: string) => void;
   searchTerm?: string;
   searchOptions?: SearchOptions;
+  activeMatchIndex?: number;
+  onMatchCountChange?: (count: number) => void;
 }
 
 export const ResponsePanel: React.FC<ResponsePanelProps> = ({
@@ -21,6 +23,8 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
   onSaveResponse,
   searchTerm = '',
   searchOptions = { caseSensitive: false, wholeWords: false, useRegex: false },
+  activeMatchIndex = -1,
+  onMatchCountChange,
 }) => {
   const [activeTab, setActiveTab] = useState<'response' | 'headers' | 'console'>('response');
   const [showSaveInput, setShowSaveInput] = useState(false);
@@ -288,6 +292,60 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
     return 'text';
   };
 
+  // Precompute match offsets for all blocks in the current tab so each
+  // highlighted block knows its global index position.
+  const tabMatchData = useMemo(() => {
+    if (!searchTerm.trim()) return { total: 0, offsets: [] as number[] };
+
+    if (activeTab === 'response' && response) {
+      const format = detectContentFormat(response.data, response.headers);
+      if (format === 'image') return { total: 0, offsets: [] };
+      const formatted = format === 'xml' ? formatXmlResponse(response.data) : formatJsonResponse(response.data);
+      const count = findMatches(formatted, searchTerm, searchOptions).length;
+      return { total: count, offsets: [0] };
+    }
+
+    if (activeTab === 'headers' && response) {
+      let offset = 0;
+      const offsets: number[] = [];
+      Object.entries(response.headers).forEach(([k, v]) => {
+        offsets.push(offset);
+        offset += findMatches(k, searchTerm, searchOptions).length;
+        offsets.push(offset);
+        offset += findMatches(v, searchTerm, searchOptions).length;
+      });
+      return { total: offset, offsets };
+    }
+
+    if (activeTab === 'console') {
+      let offset = 0;
+      const offsets: number[] = [];
+      logs.forEach(log => {
+        offsets.push(offset);
+        offset += findMatches(log, searchTerm, searchOptions).length;
+      });
+      return { total: offset, offsets };
+    }
+
+    return { total: 0, offsets: [] as number[] };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, response, logs, searchTerm, searchOptions]);
+
+  // Report match count changes to parent
+  useEffect(() => {
+    onMatchCountChange?.(tabMatchData.total);
+  }, [tabMatchData.total]);
+
+  // Scroll active match into view whenever it changes
+  useEffect(() => {
+    if (activeMatchIndex >= 0) {
+      document.getElementById('search-match-active')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    }
+  }, [activeMatchIndex]);
+
   const renderHighlightedResponse = (data: any): React.ReactNode => {
     if (!response) return null;
     const format = detectContentFormat(data, response.headers);
@@ -305,7 +363,7 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
       if (matches.length > 0) {
         // For search results, show highlighted plain text instead of syntax highlighting
         // to avoid conflicts between search highlighting and syntax highlighting
-        return <>{highlightText(formatted, matches)}</>;
+        return <>{highlightText(formatted, matches, 0, activeMatchIndex)}</>;
       }
     }
 
@@ -319,10 +377,11 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
     return formatted;
   };
 
-  const renderHighlightedText = (text: string): React.ReactNode => {
+  const renderHighlightedText = (text: string, matchOffset: number = 0): React.ReactNode => {
     if (!searchTerm.trim()) return text;
     const matches = findMatches(text, searchTerm, searchOptions);
-    return highlightText(text, matches);
+    if (matches.length === 0) return text;
+    return highlightText(text, matches, matchOffset, activeMatchIndex);
   };
 
   // Convert image data to a data URL.
@@ -732,10 +791,10 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
 
         {activeTab === 'headers' && (
           <div>
-            {Object.entries(response.headers).map(([key, value]) => (
+            {Object.entries(response.headers).map(([key, value], i) => (
               <div key={key} style={{ margin: '0.5rem 0', display: 'flex' }}>
-                <strong style={{ minWidth: '200px', color: '#0d7377' }}>{renderHighlightedText(key)}:</strong>
-                <span style={{ marginLeft: '1rem', wordBreak: 'break-all' }}>{renderHighlightedText(value)}</span>
+                <strong style={{ minWidth: '200px', color: '#0d7377' }}>{renderHighlightedText(key, tabMatchData.offsets[i * 2] ?? 0)}:</strong>
+                <span style={{ marginLeft: '1rem', wordBreak: 'break-all' }}>{renderHighlightedText(value, tabMatchData.offsets[i * 2 + 1] ?? 0)}</span>
               </div>
             ))}
           </div>
@@ -753,7 +812,7 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
                   <span style={{ color: '#888', marginRight: '0.5rem' }}>
                     [{new Date().toLocaleTimeString()}]
                   </span>
-                  {renderHighlightedText(log)}
+                  {renderHighlightedText(log, tabMatchData.offsets[index] ?? 0)}
                 </div>
               ))
             )}

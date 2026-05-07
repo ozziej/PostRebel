@@ -4,6 +4,10 @@ interface SearchBarProps {
   isOpen: boolean;
   onClose: () => void;
   onSearch: (term: string, options: SearchOptions) => void;
+  totalMatches?: number;
+  activeMatch?: number;
+  onPrevious?: () => void;
+  onNext?: () => void;
 }
 
 export interface SearchOptions {
@@ -21,7 +25,15 @@ export interface SearchResult {
   context: string; // e.g., 'url', 'headers', 'body', 'response-body'
 }
 
-export const SearchBar: React.FC<SearchBarProps> = ({ isOpen, onClose, onSearch }) => {
+export const SearchBar: React.FC<SearchBarProps> = ({
+  isOpen,
+  onClose,
+  onSearch,
+  totalMatches = 0,
+  activeMatch = 0,
+  onPrevious,
+  onNext,
+}) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [wholeWords, setWholeWords] = useState(false);
@@ -117,9 +129,57 @@ export const SearchBar: React.FC<SearchBarProps> = ({ isOpen, onClose, onSearch 
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             onClose();
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (e.shiftKey) {
+              onPrevious?.();
+            } else {
+              onNext?.();
+            }
           }
         }}
       />
+      {searchTerm.trim() && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
+          <button
+            onClick={onPrevious}
+            disabled={totalMatches === 0}
+            title="Previous match (Shift+Enter)"
+            style={{
+              background: 'none',
+              border: '1px solid #555',
+              borderRadius: '3px',
+              color: totalMatches === 0 ? '#555' : '#ccc',
+              cursor: totalMatches === 0 ? 'default' : 'pointer',
+              padding: '0.1rem 0.35rem',
+              fontSize: '0.7rem',
+              lineHeight: 1,
+            }}
+          >
+            &#9650;
+          </button>
+          <span style={{ fontSize: '0.75rem', color: '#aaa', minWidth: '50px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+            {totalMatches === 0 ? 'No results' : `${activeMatch + 1} / ${totalMatches}`}
+          </span>
+          <button
+            onClick={onNext}
+            disabled={totalMatches === 0}
+            title="Next match (Enter)"
+            style={{
+              background: 'none',
+              border: '1px solid #555',
+              borderRadius: '3px',
+              color: totalMatches === 0 ? '#555' : '#ccc',
+              cursor: totalMatches === 0 ? 'default' : 'pointer',
+              padding: '0.1rem 0.35rem',
+              fontSize: '0.7rem',
+              lineHeight: 1,
+            }}
+          >
+            &#9660;
+          </button>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
         <label
           style={{

@@ -46,6 +46,8 @@ function App() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchOptions, setSearchOptions] = useState<SearchOptions>({ caseSensitive: false, wholeWords: false, useRegex: false });
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const [totalMatchCount, setTotalMatchCount] = useState(0);
   const [shortcuts, setShortcuts] = useState<KeyboardShortcut[]>(DEFAULT_SHORTCUTS);
   const savedPrefsRef = useRef<{ activeWorkspaceId?: string; activeEnvironmentId?: string }>({});
 
@@ -414,12 +416,32 @@ function App() {
   const handleSearch = (term: string, options: SearchOptions) => {
     setSearchTerm(term);
     setSearchOptions(options);
+    setActiveMatchIndex(0);
   };
 
   const handleCloseSearch = () => {
     setIsSearchOpen(false);
     setSearchTerm('');
+    setActiveMatchIndex(0);
+    setTotalMatchCount(0);
   };
+
+  const handlePreviousMatch = () => {
+    if (totalMatchCount === 0) return;
+    setActiveMatchIndex(i => (i - 1 + totalMatchCount) % totalMatchCount);
+  };
+
+  const handleNextMatch = () => {
+    if (totalMatchCount === 0) return;
+    setActiveMatchIndex(i => (i + 1) % totalMatchCount);
+  };
+
+  // Clamp active index when the match count changes (e.g. switching response tabs)
+  useEffect(() => {
+    if (totalMatchCount > 0 && activeMatchIndex >= totalMatchCount) {
+      setActiveMatchIndex(0);
+    }
+  }, [totalMatchCount]);
 
   const openImportModal = (tab: ImportTab = 'collection') => {
     setImportModalTab(tab);
@@ -715,6 +737,10 @@ function App() {
         isOpen={isSearchOpen}
         onClose={handleCloseSearch}
         onSearch={handleSearch}
+        totalMatches={totalMatchCount}
+        activeMatch={activeMatchIndex}
+        onPrevious={handlePreviousMatch}
+        onNext={handleNextMatch}
       />
 
       <div className="app-body">
@@ -761,6 +787,8 @@ function App() {
           onSaveResponse={handleSaveSavedResponse}
           searchTerm={searchTerm}
           searchOptions={searchOptions}
+          activeMatchIndex={activeMatchIndex}
+          onMatchCountChange={setTotalMatchCount}
         />
         </div>
       </div>

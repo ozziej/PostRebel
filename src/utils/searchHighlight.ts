@@ -87,7 +87,12 @@ export function findMatches(text: string, searchTerm: string, options: SearchOpt
   return matches;
 }
 
-export function highlightText(text: string, matches: HighlightMatch[]): React.ReactNode[] {
+export function highlightText(
+  text: string,
+  matches: HighlightMatch[],
+  matchOffset: number = 0,
+  activeMatchIndex: number = -1
+): React.ReactNode[] {
   if (matches.length === 0) return [text];
 
   const result: React.ReactNode[] = [];
@@ -102,15 +107,20 @@ export function highlightText(text: string, matches: HighlightMatch[]): React.Re
       result.push(text.substring(lastIndex, match.index));
     }
 
+    const globalIndex = matchOffset + i;
+    const isActive = globalIndex === activeMatchIndex;
+
     // Add the highlighted match
     result.push(
       React.createElement('mark', {
         key: `match-${i}`,
+        id: isActive ? 'search-match-active' : undefined,
         style: {
-          backgroundColor: '#f59e0b',
+          backgroundColor: isActive ? '#f97316' : '#f59e0b',
           color: '#000',
           padding: '0 1px',
           borderRadius: '2px',
+          outline: isActive ? '2px solid #fff' : undefined,
         }
       }, match.text)
     );
