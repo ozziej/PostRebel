@@ -135,7 +135,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
     return (
       <div className="request-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div className="request-tabs">
-          <button className="tab active">runner</button>
+          <button className="tab active">Runner</button>
         </div>
         <div style={{ flex: 1, overflow: 'hidden' }}>
           {runnerCollection ? (

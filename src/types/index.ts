@@ -119,12 +119,16 @@ export interface RunnerEdge {
   target: string;
   sourceHandle?: string;
   targetHandle?: string;
-  data?: { mappings: DataMapping[] };
+  data?: {
+    mappings?: DataMapping[];
+    condition?: string; // JS script: return true to follow this edge
+  };
 }
 
 export interface RunnerNodeData extends Record<string, unknown> {
   label: string;
-  requestId?: string; // undefined for start/end nodes
+  requestId?: string;                                     // undefined for start/end nodes
+  variables?: { key: string; value: string }[];          // start node only: override env vars
 }
 
 export interface RunnerNode {

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   ReactFlow,
   addEdge,
@@ -38,7 +38,9 @@ interface RunnerCanvasProps {
 
 interface MappingDialogState {
   edgeId: string;
+  condition: string;
   mappings: DataMapping[];
+  activeTab: 'condition' | 'mappings';
 }
 
 // ── Inline response panel ─────────────────────────────────────────────────────
@@ -252,10 +254,14 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
 }) => {
   const [nodeResults, setNodeResults] = useState<Record<string, RunnerNodeResult>>({});
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [followedEdgeIds, setFollowedEdgeIds] = useState<Set<string>>(new Set());
   const [isRunning, setIsRunning] = useState(false);
   const [mappingDialog, setMappingDialog] = useState<MappingDialogState | null>(null);
   const [showAddRequest, setShowAddRequest] = useState(false);
   const [runnerName, setRunnerName] = useState(runner.name);
+  const [startVarsOpen, setStartVarsOpen] = useState(false);
+  const [startVarDrafts, setStartVarDrafts] = useState<{ key: string; value: string }[]>([]);
+  const [suggestIdx, setSuggestIdx] = useState<number | null>(null);
 
   const allRequests: ApiRequest[] = [
     ...collection.requests,
@@ -265,6 +271,14 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
   const findRequest = useCallback((requestId: string) =>
     allRequests.find(r => r.id === requestId),
   [allRequests]);
+
+  // All variable names available in the active environment (for autocomplete in start-vars dialog)
+  const availableVarNames = useMemo(() => {
+    if (!activeEnvironment) return [];
+    const fromRecord = Object.keys(activeEnvironment.variables ?? {});
+    const fromArray = (activeEnvironment.variablesArray ?? []).map(v => v.key);
+    return [...new Set([...fromRecord, ...fromArray])].filter(k => k.trim()).sort();
+  }, [activeEnvironment]);
 
   // Convert runner nodes → React Flow nodes
   const toFlowNodes = useCallback((
@@ -282,26 +296,63 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         method: n.data.requestId ? findRequest(n.data.requestId)?.method : undefined,
         result: results[n.id],
         isSelected: n.id === selectedId,
+        variables: n.data.variables,   // start node overrides
       },
     })),
   [findRequest]);
 
-  const toFlowEdges = useCallback((edges: RunnerEdge[]): Edge[] =>
-    edges.map(e => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      sourceHandle: e.sourceHandle,
-      targetHandle: e.targetHandle,
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#0d7377' },
-      style: { stroke: '#0d7377', strokeWidth: 2 },
-      label: e.data?.mappings?.length
-        ? `${e.data.mappings.length} mapping${e.data.mappings.length > 1 ? 's' : ''}`
-        : undefined,
-      labelStyle: { fill: '#aaa', fontSize: 10 },
-      labelBgStyle: { fill: '#1a2d2d' },
-      data: e.data,
-    })),
+  const toFlowEdges = useCallback((
+    edges: RunnerEdge[],
+    followedIds: Set<string> = new Set(),
+    hasRun: boolean = false,
+  ): Edge[] =>
+    edges.map(e => {
+      const isConditional = !!(e.data?.condition?.trim());
+      const isFollowed = followedIds.has(e.id);
+      const isSkipped = hasRun && isConditional && !isFollowed;
+
+      let stroke = '#0d7377'; // default: teal
+      if (hasRun) {
+        stroke = isFollowed ? '#22c55e' : '#333'; // green if followed, dim if not
+      } else if (isConditional) {
+        stroke = '#f59e0b'; // amber for conditional edges pre-run
+      }
+
+      const condLabel = isConditional
+        ? e.data!.condition!.trim()
+            .replace(/^return\s+/, '')  // strip leading "return "
+            .replace(/;$/, '')          // strip trailing semicolon
+            .slice(0, 36) + (e.data!.condition!.trim().length > 40 ? '…' : '')
+        : null;
+
+      const mappingsLabel = e.data?.mappings?.length
+        ? `${e.data.mappings.length} ↦`
+        : null;
+
+      const label = condLabel
+        ? (mappingsLabel ? `if (${condLabel})  ${mappingsLabel}` : `if (${condLabel})`)
+        : mappingsLabel || undefined;
+
+      return {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+        markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
+        style: {
+          stroke,
+          strokeWidth: isFollowed ? 2.5 : 2,
+          strokeDasharray: isConditional && !isFollowed ? '6 4' : undefined,
+          opacity: isSkipped ? 0.35 : 1,
+        },
+        animated: isFollowed && !hasRun ? false : false,
+        label,
+        labelStyle: { fill: isConditional ? '#f59e0b' : '#aaa', fontSize: 10 },
+        labelBgStyle: { fill: '#111' },
+        data: e.data,
+      };
+    }),
   []);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(
@@ -317,10 +368,18 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     runnerRef.current = runner;
     setRunnerName(runner.name);
     setNodes(toFlowNodes(runner.nodes, {}, null));
-    setEdges(toFlowEdges(runner.edges));
+    setEdges(toFlowEdges(runner.edges, new Set(), false));
     setNodeResults({});
     setSelectedNodeId(null);
+    setFollowedEdgeIds(new Set());
   }, [runner.id]);
+
+  // Re-style edges whenever followedEdgeIds changes (after a run)
+  useEffect(() => {
+    if (followedEdgeIds.size === 0) return;
+    const currentRunner = runnerRef.current;
+    setEdges(toFlowEdges(currentRunner.edges, followedEdgeIds, true));
+  }, [followedEdgeIds]);
 
   // Refresh node data whenever results or selection changes
   useEffect(() => {
@@ -337,11 +396,35 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
   // ── Node click: open inline panel ──────────────────────────────────────────
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    // Start node → open variable overrides dialog
+    if (node.type === 'start') {
+      const existing = (node.data.variables as { key: string; value: string }[] | undefined) ?? [];
+      setStartVarDrafts(existing.length > 0 ? [...existing] : [{ key: '', value: '' }]);
+      setStartVarsOpen(true);
+      return;
+    }
+    // Request node → open inline response panel
     const result = nodeResults[node.id];
     const hasViewable = result && (result.status === 'success' || result.status === 'error');
     if (!hasViewable) return;
     setSelectedNodeId(prev => prev === node.id ? null : node.id);
   }, [nodeResults]);
+
+  const handleSaveStartVars = useCallback(() => {
+    const vars = startVarDrafts.filter(v => v.key.trim());
+    // Update the start node in React Flow
+    setNodes(prev => prev.map(n =>
+      n.type !== 'start' ? n : { ...n, data: { ...n.data, variables: vars } },
+    ));
+    // Update runnerRef so the next Run picks them up immediately
+    runnerRef.current = {
+      ...runnerRef.current,
+      nodes: runnerRef.current.nodes.map(n =>
+        n.type !== 'start' ? n : { ...n, data: { ...n.data, variables: vars } },
+      ),
+    };
+    setStartVarsOpen(false);
+  }, [startVarDrafts, setNodes]);
 
   // ── Build Runner from current flow state ───────────────────────────────────
 
@@ -353,17 +436,26 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
       data: {
         label: (n.data.label as string) || '',
         requestId: n.data.requestId as string | undefined,
+        ...(n.type === 'start' && (n.data.variables as any)?.length
+          ? { variables: n.data.variables as { key: string; value: string }[] }
+          : {}),
       },
     }));
 
-    const runnerEdges: RunnerEdge[] = edges.map(e => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      sourceHandle: e.sourceHandle || undefined,
-      targetHandle: e.targetHandle || undefined,
-      data: (e.data as any)?.mappings ? { mappings: (e.data as any).mappings } : undefined,
-    }));
+    const runnerEdges: RunnerEdge[] = edges.map(e => {
+      const d = e.data as any;
+      const edgeData: RunnerEdge['data'] = {};
+      if (d?.mappings?.length) edgeData.mappings = d.mappings;
+      if (d?.condition?.trim()) edgeData.condition = d.condition.trim();
+      return {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle || undefined,
+        targetHandle: e.targetHandle || undefined,
+        data: Object.keys(edgeData).length ? edgeData : undefined,
+      };
+    });
 
     return {
       ...runnerRef.current,
@@ -390,8 +482,13 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
   }, [setEdges]);
 
   const handleEdgeClick = useCallback((_: any, edge: Edge) => {
-    const currentMappings = (edge.data as any)?.mappings || [];
-    setMappingDialog({ edgeId: edge.id, mappings: [...currentMappings] });
+    const data = edge.data as any;
+    setMappingDialog({
+      edgeId: edge.id,
+      condition: data?.condition || '',
+      mappings: data?.mappings ? [...data.mappings] : [],
+      activeTab: data?.condition?.trim() ? 'condition' : 'mappings',
+    });
   }, []);
 
   const handleAddRequest = useCallback((request: ApiRequest) => {
@@ -421,6 +518,9 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setIsRunning(true);
     setNodeResults({});
     setSelectedNodeId(null);
+    setFollowedEdgeIds(new Set());
+    // Reset edges to pre-run styling
+    setEdges(toFlowEdges(runnerRef.current.edges, new Set(), false));
 
     const currentRunner = buildRunnerFromFlow();
     runnerRef.current = currentRunner;
@@ -434,11 +534,14 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         (nodeId, result) => {
           setNodeResults(prev => ({ ...prev, [nodeId]: result }));
         },
+        (edgeId) => {
+          setFollowedEdgeIds(prev => new Set([...prev, edgeId]));
+        },
       );
     } finally {
       setIsRunning(false);
     }
-  }, [isRunning, buildRunnerFromFlow, collection, activeEnvironment, certificates]);
+  }, [isRunning, buildRunnerFromFlow, collection, activeEnvironment, certificates, toFlowEdges]);
 
   const handleExport = useCallback(() => {
     const data = JSON.stringify(buildRunnerFromFlow(), null, 2);
@@ -457,35 +560,40 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
       try {
         const imported: Runner = JSON.parse(result.content);
         setNodes(toFlowNodes(imported.nodes, {}, null));
-        setEdges(toFlowEdges(imported.edges));
+        setEdges(toFlowEdges(imported.edges, new Set(), false));
         setRunnerName(imported.name || runnerName);
         setNodeResults({});
         setSelectedNodeId(null);
+        setFollowedEdgeIds(new Set());
       } catch {
         alert('Invalid runner JSON file');
       }
     }
   }, [toFlowNodes, toFlowEdges, runnerName]);
 
-  const handleSaveMappings = useCallback(() => {
+  const handleSaveEdgeDialog = useCallback(() => {
     if (!mappingDialog) return;
-    setEdges(prev => prev.map(e => {
-      if (e.id !== mappingDialog.edgeId) return e;
-      const mappings = mappingDialog.mappings.filter(
-        m => m.fromExpression.trim() && m.toVariable.trim(),
-      );
-      return {
+    const mappings = mappingDialog.mappings.filter(
+      m => m.fromExpression.trim() && m.toVariable.trim(),
+    );
+    const condition = mappingDialog.condition.trim();
+
+    // Rebuild the runner's edge list with the updated data, then re-style
+    const currentRunner = runnerRef.current;
+    const updatedRunnerEdges: RunnerEdge[] = currentRunner.edges.map(e =>
+      e.id !== mappingDialog.edgeId ? e : {
         ...e,
-        data: mappings.length ? { mappings } : undefined,
-        label: mappings.length
-          ? `${mappings.length} mapping${mappings.length > 1 ? 's' : ''}`
-          : undefined,
-        labelStyle: { fill: '#aaa', fontSize: 10 },
-        labelBgStyle: { fill: '#1a2d2d' },
-      };
-    }));
+        data: {
+          ...(mappings.length ? { mappings } : {}),
+          ...(condition ? { condition } : {}),
+        },
+      },
+    );
+    runnerRef.current = { ...currentRunner, edges: updatedRunnerEdges };
+
+    setEdges(toFlowEdges(updatedRunnerEdges, followedEdgeIds, followedEdgeIds.size > 0));
     setMappingDialog(null);
-  }, [mappingDialog, setEdges]);
+  }, [mappingDialog, setEdges, toFlowEdges, followedEdgeIds]);
 
   // Derive the selected node's data for the response panel
   const selectedResult = selectedNodeId ? nodeResults[selectedNodeId] : null;
@@ -604,105 +712,305 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         )}
       </div>
 
-      {/* Mapping dialog */}
-      {mappingDialog && (
+      {/* Start node: variable overrides dialog */}
+      {startVarsOpen && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000,
         }}>
           <div style={{
-            background: '#1e1e1e', border: '1px solid #444', borderRadius: 8,
-            padding: '1.5rem', minWidth: 420, maxWidth: 560, maxHeight: '80vh', overflowY: 'auto',
+            background: '#1a1a1a', border: '1px solid #444', borderRadius: 8,
+            width: 460, maxHeight: '80vh', display: 'flex', flexDirection: 'column',
           }}>
-            <h3 style={{ margin: '0 0 0.5rem', color: '#fff', fontSize: '1rem' }}>Data Mappings</h3>
-            <p style={{ color: '#888', fontSize: '0.8rem', margin: '0 0 0.75rem', lineHeight: 1.5 }}>
-              Extract a value from this node's response and save it as a variable for downstream requests.
-            </p>
-
-            {/* Column headers */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
-              <div style={{ flex: 1, fontSize: '0.72rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                From response
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', borderBottom: '1px solid #333' }}>
+              <div>
+                <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>Start — Variable Overrides</span>
               </div>
-              <div style={{ width: 16 }} />
-              <div style={{ flex: 1, fontSize: '0.72rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Save as variable
-              </div>
-              <div style={{ width: 28 }} />
+              <button onClick={() => setStartVarsOpen(false)} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
             </div>
 
-            {mappingDialog.mappings.map((mapping, idx) => (
-              <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                <input
-                  placeholder="body.access_token"
-                  value={mapping.fromExpression}
-                  onChange={e => {
-                    const updated = [...mappingDialog.mappings];
-                    updated[idx] = { ...updated[idx], fromExpression: e.target.value };
-                    setMappingDialog(prev => prev ? { ...prev, mappings: updated } : null);
-                  }}
-                  className="form-input"
-                  style={{ flex: 1, fontSize: '0.82rem' }}
-                />
-                <span style={{ color: '#555', flexShrink: 0 }}>→</span>
-                {/* Variable name with static {{ }} decorators so it's unambiguous */}
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', border: '1px solid #444', borderRadius: 4, background: '#111', overflow: 'hidden' }}>
-                  <span style={{ padding: '0 4px 0 8px', color: '#0d7377', fontSize: '0.82rem', fontFamily: 'monospace', flexShrink: 0, userSelect: 'none' }}>{'{{'}  </span>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+              <p style={{ color: '#888', fontSize: '0.8rem', margin: '0 0 0.75rem', lineHeight: 1.6 }}>
+                Override environment variables for this runner run only. These values take precedence over the active environment and are not saved back to it.
+              </p>
+
+              {/* Column headers */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                <div style={{ flex: 1, fontSize: '0.72rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Variable name</div>
+                <div style={{ flex: 1, fontSize: '0.72rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Value</div>
+                <div style={{ width: 28 }} />
+              </div>
+
+              {startVarDrafts.map((v, idx) => {
+                const suggestions = availableVarNames.filter(name =>
+                  !v.key || name.toLowerCase().includes(v.key.toLowerCase()),
+                );
+                const currentEnvValue = activeEnvironment?.variables[v.key]
+                  ?? activeEnvironment?.variablesArray?.find(ev => ev.key === v.key)?.value;
+                const isSecret = activeEnvironment?.variablesArray?.find(ev => ev.key === v.key)?.isSecret;
+
+                return (
+                <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                  {/* Variable name input with dropdown autocomplete */}
+                  <div style={{ flex: 1, position: 'relative' }}>
+                    <input
+                      placeholder="e.g. base_url"
+                      value={v.key}
+                      onChange={e => {
+                        const updated = [...startVarDrafts];
+                        updated[idx] = { ...updated[idx], key: e.target.value };
+                        setStartVarDrafts(updated);
+                      }}
+                      onFocus={() => setSuggestIdx(idx)}
+                      onBlur={() => setTimeout(() => setSuggestIdx(null), 150)}
+                      className="form-input"
+                      style={{ width: '100%', fontSize: '0.82rem', fontFamily: 'monospace' }}
+                    />
+                    {suggestIdx === idx && suggestions.length > 0 && (
+                      <div style={{
+                        position: 'absolute', top: '100%', left: 0, right: 0,
+                        marginTop: 2, background: '#1e1e1e', border: '1px solid #444',
+                        borderRadius: 4, zIndex: 10001, maxHeight: 180, overflowY: 'auto',
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+                      }}>
+                        {suggestions.map(name => {
+                          const envVal = activeEnvironment?.variables[name]
+                            ?? activeEnvironment?.variablesArray?.find(ev => ev.key === name)?.value;
+                          const secret = activeEnvironment?.variablesArray?.find(ev => ev.key === name)?.isSecret;
+                          return (
+                            <div
+                              key={name}
+                              onMouseDown={() => {
+                                const updated = [...startVarDrafts];
+                                updated[idx] = { ...updated[idx], key: name };
+                                setStartVarDrafts(updated);
+                                setSuggestIdx(null);
+                              }}
+                              style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                gap: 8, padding: '0.35rem 0.6rem', cursor: 'pointer',
+                              }}
+                              onMouseEnter={e => (e.currentTarget.style.background = '#2a2a2a')}
+                              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                            >
+                              <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: '#e0e0e0' }}>{name}</span>
+                              <span style={{ fontSize: '0.72rem', color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>
+                                {secret ? '••••••' : (envVal ?? '')}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                   <input
-                    placeholder="access_token"
-                    value={mapping.toVariable.replace(/^\{\{/, '').replace(/\}\}$/, '')}
+                    placeholder={
+                      isSecret ? '(secret — enter new value)'
+                      : currentEnvValue ? `currently: ${currentEnvValue}`
+                      : 'override value'
+                    }
+                    value={v.value}
                     onChange={e => {
-                      const updated = [...mappingDialog.mappings];
-                      updated[idx] = { ...updated[idx], toVariable: e.target.value };
-                      setMappingDialog(prev => prev ? { ...prev, mappings: updated } : null);
+                      const updated = [...startVarDrafts];
+                      updated[idx] = { ...updated[idx], value: e.target.value };
+                      setStartVarDrafts(updated);
                     }}
-                    style={{
-                      flex: 1, background: 'transparent', border: 'none', outline: 'none',
-                      color: '#e0e0e0', fontSize: '0.82rem', padding: '0.4rem 0',
-                      fontFamily: 'monospace',
-                    }}
+                    className="form-input"
+                    style={{ flex: 1, fontSize: '0.82rem' }}
                   />
-                  <span style={{ padding: '0 8px 0 4px', color: '#0d7377', fontSize: '0.82rem', fontFamily: 'monospace', flexShrink: 0, userSelect: 'none' }}>{'}}'}</span>
+                  <button
+                    className="button-secondary button"
+                    onClick={() => setStartVarDrafts(prev => prev.filter((_, i) => i !== idx))}
+                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                  >✗</button>
                 </div>
-                <button
-                  className="button-secondary button"
-                  onClick={() => {
-                    const updated = mappingDialog.mappings.filter((_, i) => i !== idx);
-                    setMappingDialog(prev => prev ? { ...prev, mappings: updated } : null);
-                  }}
-                  style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                >
-                  ✗
-                </button>
-              </div>
-            ))}
+              ); })}
 
-            {/* Quick reference */}
-            <div style={{ background: '#111', borderRadius: 4, padding: '0.5rem 0.75rem', marginBottom: '1rem', fontSize: '0.75rem', color: '#666', lineHeight: 1.6 }}>
-              <span style={{ color: '#555', fontWeight: 600 }}>Expression examples: </span>
-              <code style={{ color: '#0d9e9e' }}>body.access_token</code>
-              {' · '}
-              <code style={{ color: '#0d9e9e' }}>body.data.id</code>
-              {' · '}
-              <code style={{ color: '#0d9e9e' }}>status</code>
-              {' · '}
-              <code style={{ color: '#0d9e9e' }}>headers.x-request-id</code>
+              <button
+                className="button button-secondary"
+                onClick={() => setStartVarDrafts(prev => [...prev, { key: '', value: '' }])}
+                style={{ fontSize: '0.82rem' }}
+              >
+                + Add Override
+              </button>
+
+              <div style={{ background: '#111', borderRadius: 4, padding: '0.5rem 0.75rem', marginTop: '0.75rem', fontSize: '0.75rem', color: '#666', lineHeight: 1.6 }}>
+                Use this to swap <code style={{ color: '#0d9e9e' }}>base_url</code> to a staging server, pin a specific <code style={{ color: '#0d9e9e' }}>user_id</code>, or inject a known token without touching your environment.
+                Values here can also be referenced with <code style={{ color: '#0d9e9e' }}>{'{{variable_name}}'}</code> in request nodes.
+              </div>
             </div>
 
-            <button
-              className="button button-secondary"
-              onClick={() => setMappingDialog(prev => prev
-                ? { ...prev, mappings: [...prev.mappings, { fromExpression: '', toVariable: '' }] }
-                : null,
-              )}
-              style={{ marginBottom: '1rem', fontSize: '0.82rem' }}
-            >
-              + Add Mapping
-            </button>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '0.75rem 1rem', borderTop: '1px solid #333' }}>
+              <button className="button button-secondary" onClick={() => setStartVarsOpen(false)}>Cancel</button>
+              <button className="button" onClick={handleSaveStartVars}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
 
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+      {/* Edge dialog: Condition + Mappings */}
+      {mappingDialog && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000,
+        }}>
+          <div style={{
+            background: '#1a1a1a', border: '1px solid #444', borderRadius: 8,
+            width: 520, maxHeight: '85vh', display: 'flex', flexDirection: 'column',
+          }}>
+            {/* Dialog header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '0.75rem 1rem', borderBottom: '1px solid #333',
+            }}>
+              <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>Edge Settings</span>
+              <button onClick={() => setMappingDialog(null)} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
+            </div>
+
+            {/* Tabs */}
+            <div style={{ display: 'flex', borderBottom: '1px solid #333', background: '#141414' }}>
+              {(['condition', 'mappings'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setMappingDialog(prev => prev ? { ...prev, activeTab: tab } : null)}
+                  style={{
+                    background: 'none', border: 'none',
+                    borderBottom: mappingDialog.activeTab === tab ? '2px solid #f59e0b' : '2px solid transparent',
+                    color: mappingDialog.activeTab === tab ? '#f59e0b' : '#888',
+                    padding: '0.4rem 1rem',
+                    cursor: 'pointer', fontSize: '0.82rem',
+                    fontWeight: mappingDialog.activeTab === tab ? 600 : 400,
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {tab === 'condition' ? 'Condition (if)' : 'Data Mappings'}
+                  {tab === 'condition' && mappingDialog.condition.trim() && (
+                    <span style={{ marginLeft: 5, background: '#f59e0b', color: '#000', fontSize: '0.6rem', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>ON</span>
+                  )}
+                  {tab === 'mappings' && mappingDialog.mappings.length > 0 && (
+                    <span style={{ marginLeft: 5, background: '#0d7377', color: '#fff', fontSize: '0.6rem', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>{mappingDialog.mappings.length}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+
+              {/* ── Condition tab ──────────────────────────────────────── */}
+              {mappingDialog.activeTab === 'condition' && (
+                <div>
+                  <p style={{ color: '#888', fontSize: '0.8rem', margin: '0 0 0.75rem', lineHeight: 1.6 }}>
+                    Write a JavaScript expression that returns <code style={{ background: '#111', padding: '0 3px', borderRadius: 3, color: '#4ade80' }}>true</code> to follow this edge, or <code style={{ background: '#111', padding: '0 3px', borderRadius: 3, color: '#f87171' }}>false</code> to skip it.
+                    Leave blank to always follow (unconditional / else).
+                  </p>
+
+                  <textarea
+                    className="form-textarea"
+                    value={mappingDialog.condition}
+                    onChange={e => setMappingDialog(prev => prev ? { ...prev, condition: e.target.value } : null)}
+                    placeholder={`// Available: response, body, status, headers, variables\n\nreturn status === 200;\n\n// return body.success === true;\n// return body.access_token !== undefined;\n// return status >= 200 && status < 300;`}
+                    style={{ minHeight: 160, fontFamily: 'monospace', fontSize: '0.82rem', resize: 'vertical' }}
+                    spellCheck={false}
+                  />
+
+                  <div style={{ background: '#111', borderRadius: 4, padding: '0.6rem 0.75rem', marginTop: '0.75rem', fontSize: '0.75rem', color: '#666', lineHeight: 1.7 }}>
+                    <div style={{ color: '#555', fontWeight: 600, marginBottom: 3 }}>Available variables</div>
+                    <code style={{ color: '#0d9e9e' }}>status</code> — HTTP status number (e.g. 200)<br />
+                    <code style={{ color: '#0d9e9e' }}>body</code> — parsed response body (JSON object or string)<br />
+                    <code style={{ color: '#0d9e9e' }}>headers</code> — response headers object<br />
+                    <code style={{ color: '#0d9e9e' }}>variables</code> — current environment variables<br />
+                    <code style={{ color: '#0d9e9e' }}>response</code> — full response object (has .status, .body, .headers)
+                  </div>
+
+                  {mappingDialog.condition.trim() && (
+                    <button
+                      className="button-secondary button"
+                      onClick={() => setMappingDialog(prev => prev ? { ...prev, condition: '' } : null)}
+                      style={{ marginTop: '0.5rem', fontSize: '0.78rem', color: '#f87171', borderColor: '#f87171' }}
+                    >
+                      Clear condition (make unconditional)
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* ── Mappings tab ───────────────────────────────────────── */}
+              {mappingDialog.activeTab === 'mappings' && (
+                <div>
+                  <p style={{ color: '#888', fontSize: '0.8rem', margin: '0 0 0.75rem', lineHeight: 1.5 }}>
+                    Extract values from the source response and inject them as variables for downstream requests.
+                    Mappings only apply when this edge is followed.
+                  </p>
+
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                    <div style={{ flex: 1, fontSize: '0.72rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px' }}>From response</div>
+                    <div style={{ width: 16 }} />
+                    <div style={{ flex: 1, fontSize: '0.72rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Save as variable</div>
+                    <div style={{ width: 28 }} />
+                  </div>
+
+                  {mappingDialog.mappings.map((mapping, idx) => (
+                    <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                      <input
+                        placeholder="body.access_token"
+                        value={mapping.fromExpression}
+                        onChange={e => {
+                          const updated = [...mappingDialog.mappings];
+                          updated[idx] = { ...updated[idx], fromExpression: e.target.value };
+                          setMappingDialog(prev => prev ? { ...prev, mappings: updated } : null);
+                        }}
+                        className="form-input"
+                        style={{ flex: 1, fontSize: '0.82rem' }}
+                      />
+                      <span style={{ color: '#555', flexShrink: 0 }}>→</span>
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', border: '1px solid #444', borderRadius: 4, background: '#111', overflow: 'hidden' }}>
+                        <span style={{ padding: '0 4px 0 8px', color: '#0d7377', fontSize: '0.82rem', fontFamily: 'monospace', flexShrink: 0, userSelect: 'none' }}>{'{{'}</span>
+                        <input
+                          placeholder="access_token"
+                          value={mapping.toVariable.replace(/^\{\{/, '').replace(/\}\}$/, '')}
+                          onChange={e => {
+                            const updated = [...mappingDialog.mappings];
+                            updated[idx] = { ...updated[idx], toVariable: e.target.value };
+                            setMappingDialog(prev => prev ? { ...prev, mappings: updated } : null);
+                          }}
+                          style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#e0e0e0', fontSize: '0.82rem', padding: '0.4rem 0', fontFamily: 'monospace' }}
+                        />
+                        <span style={{ padding: '0 8px 0 4px', color: '#0d7377', fontSize: '0.82rem', fontFamily: 'monospace', flexShrink: 0, userSelect: 'none' }}>{'}}'}</span>
+                      </div>
+                      <button
+                        className="button-secondary button"
+                        onClick={() => {
+                          const updated = mappingDialog.mappings.filter((_, i) => i !== idx);
+                          setMappingDialog(prev => prev ? { ...prev, mappings: updated } : null);
+                        }}
+                        style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                      >✗</button>
+                    </div>
+                  ))}
+
+                  <button
+                    className="button button-secondary"
+                    onClick={() => setMappingDialog(prev => prev
+                      ? { ...prev, mappings: [...prev.mappings, { fromExpression: '', toVariable: '' }] }
+                      : null,
+                    )}
+                    style={{ fontSize: '0.82rem', marginBottom: '0.5rem' }}
+                  >
+                    + Add Mapping
+                  </button>
+
+                  <div style={{ background: '#111', borderRadius: 4, padding: '0.5rem 0.75rem', fontSize: '0.75rem', color: '#666', lineHeight: 1.6, marginTop: '0.25rem' }}>
+                    <span style={{ color: '#555', fontWeight: 600 }}>Expressions: </span>
+                    <code style={{ color: '#0d9e9e' }}>body.access_token</code> · <code style={{ color: '#0d9e9e' }}>body.data.id</code> · <code style={{ color: '#0d9e9e' }}>status</code> · <code style={{ color: '#0d9e9e' }}>headers.x-request-id</code>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '0.75rem 1rem', borderTop: '1px solid #333' }}>
               <button className="button button-secondary" onClick={() => setMappingDialog(null)}>Cancel</button>
-              <button className="button" onClick={handleSaveMappings}>Save Mappings</button>
+              <button className="button" onClick={handleSaveEdgeDialog}>Save</button>
             </div>
           </div>
         </div>

@@ -27,21 +27,43 @@ const NodeStatusBadge: React.FC<NodeStatusBadgeProps> = ({ status }) => {
 // ── StartNode ────────────────────────────────────────────────────────────────
 
 interface StartNodeProps {
-  data: { label: string; result?: RunnerNodeResult };
+  data: {
+    label: string;
+    result?: RunnerNodeResult;
+    variables?: { key: string; value: string }[];
+  };
 }
 
-export const StartNode: React.FC<StartNodeProps> = ({ data }) => (
-  <div style={{
-    width: 64, height: 64, borderRadius: '50%',
-    background: '#166534', border: '2px solid #22c55e',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    color: '#fff', fontSize: '0.7rem', fontWeight: 700, userSelect: 'none', position: 'relative',
-  }}>
-    {data.result && <NodeStatusBadge status={data.result.status} />}
-    <span>START</span>
-    <Handle type="source" position={Position.Bottom} id="out" style={{ background: '#22c55e' }} />
-  </div>
-);
+export const StartNode: React.FC<StartNodeProps> = ({ data }) => {
+  const overrideCount = (data.variables ?? []).filter(v => v.key.trim()).length;
+  return (
+    <div style={{
+      width: 72, height: 72, borderRadius: '50%',
+      background: '#166534', border: '2px solid #22c55e',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      color: '#fff', fontSize: '0.7rem', fontWeight: 700,
+      userSelect: 'none', position: 'relative',
+      cursor: 'pointer',
+    }}>
+      {data.result && <NodeStatusBadge status={data.result.status} />}
+      <span>START</span>
+      {overrideCount > 0 ? (
+        <span title={`${overrideCount} variable override${overrideCount > 1 ? 's' : ''}`} style={{
+          position: 'absolute', top: -4, right: -4,
+          background: '#7c3aed', color: '#fff',
+          borderRadius: '50%', width: 18, height: 18,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '0.6rem', fontWeight: 700, border: '1.5px solid #111',
+        }}>
+          {overrideCount}
+        </span>
+      ) : (
+        <span style={{ fontSize: '0.55rem', color: '#86efac', marginTop: 1 }}>⚙ vars</span>
+      )}
+      <Handle type="source" position={Position.Bottom} id="out" style={{ background: '#22c55e' }} />
+    </div>
+  );
+};
 
 // ── RequestNode ──────────────────────────────────────────────────────────────
 

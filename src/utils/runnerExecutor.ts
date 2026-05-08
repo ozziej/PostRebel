@@ -1,22 +1,19 @@
-import { Runner, RunnerNode, RunnerNodeResult, Collection, Environment, Certificate, ApiResponse } from '../types';
+import { Runner, RunnerEdge, RunnerNodeResult, Collection, Environment, Certificate, ApiResponse } from '../types';
 import { HttpService } from './httpService';
+
+// ── Value extraction (dot-notation paths into a response) ─────────────────────
 
 function extractValue(response: ApiResponse, expression: string): string {
   const parts = expression.split('.');
   const root = parts[0];
 
-  if (root === 'status') {
-    return String(response.status);
-  }
-
-  if (root === 'statusText') {
-    return String(response.statusText);
-  }
+  if (root === 'status') return String(response.status);
+  if (root === 'statusText') return String(response.statusText);
 
   if (root === 'headers') {
     const headerKey = parts.slice(1).join('.').toLowerCase();
-    const headerValue = response.headers[headerKey] || response.headers[Object.keys(response.headers).find(k => k.toLowerCase() === headerKey) || ''];
-    return String(headerValue ?? '');
+    const match = Object.keys(response.headers).find(k => k.toLowerCase() === headerKey);
+    return match ? String(response.headers[match]) : '';
   }
 
   if (root === 'body') {
@@ -32,60 +29,117 @@ function extractValue(response: ApiResponse, expression: string): string {
   return '';
 }
 
+// ── Variable mapping ──────────────────────────────────────────────────────────
+
 function applyMappings(
   response: ApiResponse,
   edgeMappings: { fromExpression: string; toVariable: string }[],
-  envVariables: Record<string, string>
+  envVariables: Record<string, string>,
 ): Record<string, string> {
   const updated = { ...envVariables };
   for (const mapping of edgeMappings) {
     const value = extractValue(response, mapping.fromExpression.trim());
     if (value !== '') {
-      // Strip {{ }} if the user accidentally included them
       const varName = mapping.toVariable.trim().replace(/^\{\{/, '').replace(/\}\}$/, '');
-      if (varName) {
-        updated[varName] = value;
-      }
+      if (varName) updated[varName] = value;
     }
   }
   return updated;
 }
+
+// ── Condition evaluation ──────────────────────────────────────────────────────
+//
+// The condition script has access to:
+//   response  – { status, statusText, headers, body }
+//   body      – shorthand for response.body (parsed JSON object or string)
+//   status    – shorthand for response.status (number)
+//   headers   – shorthand for response.headers
+//   variables – current environment variables as a plain object
+//
+// The script must explicitly return true/false, e.g.:
+//   return status === 200;
+//   return body.success === true;
+//   return body.items && body.items.length > 0;
+
+export function evaluateCondition(
+  script: string,
+  response: ApiResponse,
+  variables: Record<string, string>,
+): { passed: boolean; error?: string } {
+  try {
+    const body = response.data;
+    const status = response.status;
+    const headers = response.headers;
+
+    const fn = new Function(
+      'response', 'body', 'status', 'headers', 'variables',
+      '"use strict";\n' + script,
+    );
+
+    const result = fn(
+      { status, statusText: response.statusText, headers, body, data: response.data },
+      body,
+      status,
+      headers,
+      { ...variables },
+    );
+
+    return { passed: Boolean(result) };
+  } catch (err: any) {
+    return { passed: false, error: err.message || String(err) };
+  }
+}
+
+// ── Main executor ─────────────────────────────────────────────────────────────
 
 export async function executeRunner(
   runner: Runner,
   collection: Collection,
   environment: Environment | null,
   certificates: Certificate[],
-  onNodeStatusChange: (nodeId: string, result: RunnerNodeResult) => void
+  onNodeStatusChange: (nodeId: string, result: RunnerNodeResult) => void,
+  onEdgeFollowed?: (edgeId: string) => void,
 ): Promise<void> {
-  // Build adjacency list: nodeId → next nodeId
-  const nextNode: Record<string, string> = {};
-  const edgeMappings: Record<string, { fromExpression: string; toVariable: string }[]> = {};
-
+  // Build: sourceNodeId → outgoing edges
+  // Conditional edges are sorted before unconditional ones so the unconditional
+  // edge acts as the "else" fallback when no condition matches.
+  const outgoingEdges: Record<string, RunnerEdge[]> = {};
   for (const edge of runner.edges) {
-    nextNode[edge.source] = edge.target;
-    if (edge.data?.mappings?.length) {
-      edgeMappings[edge.source] = edge.data.mappings;
-    }
+    if (!outgoingEdges[edge.source]) outgoingEdges[edge.source] = [];
+    outgoingEdges[edge.source].push(edge);
+  }
+  for (const nodeId of Object.keys(outgoingEdges)) {
+    outgoingEdges[nodeId].sort((a, b) => {
+      const ac = !!(a.data?.condition?.trim());
+      const bc = !!(b.data?.condition?.trim());
+      if (ac && !bc) return -1; // conditional edges first
+      if (!ac && bc) return 1;
+      return 0;
+    });
   }
 
-  // Find start node
   const startNode = runner.nodes.find(n => n.type === 'start');
   if (!startNode) return;
 
-  // Local copy of env variables for passing data between requests
   let localVars: Record<string, string> = environment
     ? { ...environment.variables }
     : {};
 
-  // Walk the sequence
-  let currentNodeId: string | undefined = startNode.id;
+  // Apply start-node variable overrides (runner-scoped, don't modify the real environment)
+  for (const { key, value } of startNode.data.variables ?? []) {
+    if (key.trim()) localVars[key.trim()] = value;
+  }
 
+  // Start node
   onNodeStatusChange(startNode.id, { nodeId: startNode.id, status: 'running' });
   await delay(100);
   onNodeStatusChange(startNode.id, { nodeId: startNode.id, status: 'success' });
 
-  currentNodeId = nextNode[startNode.id];
+  // Start always takes its single outgoing edge unconditionally
+  const startEdge = outgoingEdges[startNode.id]?.[0];
+  if (!startEdge) return;
+  onEdgeFollowed?.(startEdge.id);
+  let currentNodeId: string | undefined = startEdge.target;
 
   while (currentNodeId) {
     const node = runner.nodes.find(n => n.id === currentNodeId);
@@ -99,10 +153,8 @@ export async function executeRunner(
     }
 
     if (node.type === 'request') {
-      // Find the request in the collection
       let request = collection.requests.find(r => r.id === node.data.requestId);
       if (!request) {
-        // Search in folders
         for (const folder of collection.folders || []) {
           const found = folder.requests.find(r => r.id === node.data.requestId);
           if (found) { request = found; break; }
@@ -111,8 +163,7 @@ export async function executeRunner(
 
       if (!request) {
         onNodeStatusChange(node.id, {
-          nodeId: node.id,
-          status: 'error',
+          nodeId: node.id, status: 'error',
           error: 'Request not found in collection',
         });
         break;
@@ -120,19 +171,13 @@ export async function executeRunner(
 
       onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
 
+      let response: ApiResponse;
       try {
-        // Build a merged environment using localVars
         const mergedEnvironment: Environment = environment
           ? { ...environment, variables: localVars }
           : { id: 'runner-env', name: 'Runner', variables: localVars };
 
-        const response = await HttpService.executeRequest(request, mergedEnvironment, certificates, collection);
-
-        // Apply mappings from the outgoing edge (source = this node)
-        const mappings = edgeMappings[node.id];
-        if (mappings) {
-          localVars = applyMappings(response, mappings, localVars);
-        }
+        response = await HttpService.executeRequest(request, mergedEnvironment, certificates, collection);
 
         onNodeStatusChange(node.id, {
           nodeId: node.id,
@@ -141,15 +186,42 @@ export async function executeRunner(
         });
       } catch (err: any) {
         onNodeStatusChange(node.id, {
-          nodeId: node.id,
-          status: 'error',
+          nodeId: node.id, status: 'error',
           error: err.message || String(err),
         });
         break;
       }
-    }
 
-    currentNodeId = nextNode[currentNodeId];
+      // Pick which outgoing edge to follow
+      const edges = outgoingEdges[node.id] || [];
+      let followedEdge: RunnerEdge | null = null;
+
+      for (const edge of edges) {
+        const condScript = edge.data?.condition?.trim();
+        if (!condScript) {
+          // Unconditional — acts as the else/default
+          followedEdge = edge;
+          break;
+        }
+        const { passed } = evaluateCondition(condScript, response, localVars);
+        if (passed) {
+          followedEdge = edge;
+          break;
+        }
+      }
+
+      if (!followedEdge) break; // No matching edge — stop
+
+      // Apply this specific edge's mappings then follow it
+      if (followedEdge.data?.mappings?.length) {
+        localVars = applyMappings(response, followedEdge.data.mappings, localVars);
+      }
+
+      onEdgeFollowed?.(followedEdge.id);
+      currentNodeId = followedEdge.target;
+    } else {
+      break;
+    }
   }
 }
 

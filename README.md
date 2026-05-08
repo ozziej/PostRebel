@@ -29,6 +29,7 @@ A local API testing tool with git support - your Postman alternative.
 - **Find in request/response** - `Cmd+F` / `Ctrl+F` searches across all request and response content with plain text, case-sensitive, whole-word, and regex modes
 - **Keyboard shortcuts** - Configurable shortcuts for common actions (Send: `Cmd+Enter` / `Ctrl+Enter`); customise in Settings
 - **Image responses** - APIs that return images (`image/*`) display the image inline with download and actual-size controls
+- **Collection Runner** - Chain multiple requests into a visual flow diagram, pass data between them via response mappings, branch on conditions with JavaScript, and view each node's response inline
 
 ## Search and Find
 
@@ -206,6 +207,8 @@ PostRebel/
 │       ├── environments/           # Environment configs (committed)
 │       │   ├── dev.json            # Public variables
 │       │   └── dev.secrets.json    # Secret variables (gitignored)
+│       ├── runners/                # Collection runners (committed)
+│       │   └── <id>.json           # One file per runner
 │       ├── history/                # Request execution history
 │       │   └── history.json        # Log entries (local only)
 │       └── certificates/           # Custom certificates (NOT committed)
@@ -258,6 +261,94 @@ if (response.access_token) {
     pm.environment.set("token", response.access_token);
 }
 ```
+
+### Collection Runner
+
+The Collection Runner lets you chain multiple requests together into a visual flow diagram, pass data between them, branch on conditions, and execute the whole sequence with live status feedback — without writing any glue code.
+
+#### Creating a runner
+
+1. Click the **+** button on any collection in the sidebar.
+2. Select **New Runner** from the dropdown.
+3. The runner appears under the collection with a purple **RUNNER** badge.
+4. Click it to open the canvas, which starts with a **Start** and **End** node.
+
+#### Building the flow
+
+- Click **+ Add Request** in the toolbar and pick any request from the collection. A new node is added to the canvas.
+- **Connect nodes** by dragging from the bottom handle of one node to the top handle of the next.
+- Drag nodes to rearrange them on the canvas. Changes are saved when you click **Save** or blur the runner name field.
+
+#### Viewing results
+
+After clicking **▶ Run**, each node shows a live status badge:
+
+| Badge | Meaning |
+|-------|---------|
+| `…` amber | Currently executing |
+| `✓` green | Succeeded (2xx) |
+| `✗` red | Failed (4xx / 5xx / network error) |
+
+**Click any completed node** to open an inline response panel on the right showing the full Body and Headers for that node. You can inspect both a successful node and a failed node at the same time without leaving the runner view.
+
+#### Passing data between requests (mappings)
+
+Click any **edge** (the arrow between two nodes) to open the Edge Settings dialog, then go to the **Data Mappings** tab.
+
+| Field | Example |
+|-------|---------|
+| From response | `body.access_token` |
+| Save as variable | `access_token` |
+
+The extracted value is then available as `{{access_token}}` in all downstream request URLs, headers, auth fields, and bodies. Supported expressions:
+
+- `body.fieldName` — JSON field in the response body (dot-notation for nested: `body.data.id`)
+- `status` — HTTP status code as a string
+- `statusText` — e.g. `"OK"`, `"Not Found"`
+- `headers.content-type` — any response header (case-insensitive)
+
+Mappings only apply when the edge they are on is actually followed.
+
+#### Conditional branching (if / else)
+
+Click an edge and go to the **Condition (if)** tab. Write JavaScript that returns `true` to follow this edge or `false` to skip it. Leave blank for an unconditional edge (always followed, acts as the *else* path).
+
+```javascript
+// Follow this edge only on a successful response
+return status === 200;
+
+// Check a field in the JSON body
+return body.success === true;
+
+// Ensure a token was actually returned
+return body.access_token !== undefined;
+
+// Range check
+return status >= 200 && status < 300;
+
+// Use a previously extracted variable
+return variables.retry_count < 3;
+```
+
+Available identifiers: `status`, `body`, `headers`, `variables`, `response` (full object).
+
+**Evaluation order** — When a node has multiple outgoing edges, conditional edges are checked first (in draw order); the first one that returns `true` is followed. Any unconditional edge acts as the *else* fallback. If no edge matches, the run stops at that node.
+
+**Edge colours:**
+
+| Colour | Meaning |
+|--------|---------|
+| Teal solid | Unconditional (no condition set) |
+| Amber dashed | Conditional, not yet run |
+| Green solid | Followed during the last run |
+| Dimmed | Skipped (condition returned false) |
+
+#### Export and import
+
+- **Export** — Downloads the runner as a `.runner.json` file for sharing or backup.
+- **Import** — Loads a previously exported runner JSON file onto the canvas.
+
+Runner files are also committed to git alongside collections and environments (`{workspace}/runners/`).
 
 ### Importing
 
@@ -420,13 +511,15 @@ npm run dist         # Create distributable packages
 
 ## Roadmap
 
-🚧 **Planned Features:**
+✅ **Completed:**
 - UI Improvements
     - ✅ **Copy Response Output to clipboard** - Click the 📋 Copy button in any response to copy formatted output to clipboard
     - ✅ **Find (in request and response)** - Press `Ctrl+F` / `Cmd+F` to search across all request and response content with regex support
     - ✅ **Configurable Shortcut keys for UI** - Customizable keyboard shortcuts including Send request (`Cmd+Enter`/`Ctrl+Enter`), configurable in Settings
     - ✅ **Image support in Response (Binary Data)** - View images directly in response panel with download and zoom controls
-- Collection runner (batch/sequential request execution)
+- ✅ **Collection Runner** - Visual flow-based runner with data mappings, conditional JavaScript branching, and inline per-node response inspection
+
+🚧 **Planned:**
 - Collection export (Postman v2, OpenAPI)
 - Import/export workspaces
 - Workspace templates
