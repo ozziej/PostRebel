@@ -17,11 +17,22 @@ function extractValue(response: ApiResponse, expression: string): string {
   }
 
   if (root === 'body') {
+    // Split on dots, but each segment may contain one or more array indices, e.g.
+    //   "advanceBalance.advances[0].advancesUuid"
+    //   "items[0][2].name"
+    // Strategy: split the full path (after "body.") on "." then for each segment
+    // further split on "[N]" brackets so every token is either a key or a numeric index.
     const path = parts.slice(1);
     let current: any = response.data;
-    for (const key of path) {
+    for (const segment of path) {
       if (current == null) return '';
-      current = current[key];
+      // Expand "key[0][1]..." into ["key", "0", "1", ...]
+      const tokens = segment.split(/\[(\d+)\]/).filter(t => t !== '');
+      for (const token of tokens) {
+        if (current == null) return '';
+        const idx = Number(token);
+        current = Number.isNaN(idx) ? current[token] : current[idx];
+      }
     }
     return current != null ? String(current) : '';
   }

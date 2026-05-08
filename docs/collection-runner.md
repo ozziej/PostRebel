@@ -75,8 +75,11 @@ The variable is then available as `{{access_token}}` in any downstream request U
 
 | Expression | What it extracts |
 |-----------|-----------------|
-| `body.fieldName` | JSON field from the response body |
+| `body.fieldName` | Top-level JSON field |
 | `body.nested.field` | Deeply nested JSON field |
+| `body.items[0].id` | First element of an array, then a field |
+| `body.results[2].name` | Third element of an array |
+| `body.data.items[0].itemUuid` | Nested array with field access |
 | `status` | HTTP status code as a string (e.g. `"200"`) |
 | `statusText` | HTTP status text (e.g. `"OK"`) |
 | `headers.content-type` | Response header value (case-insensitive) |

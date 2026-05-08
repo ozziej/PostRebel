@@ -258,10 +258,19 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
   const [isRunning, setIsRunning] = useState(false);
   const [mappingDialog, setMappingDialog] = useState<MappingDialogState | null>(null);
   const [showAddRequest, setShowAddRequest] = useState(false);
+  const [requestSearch, setRequestSearch] = useState('');
   const [runnerName, setRunnerName] = useState(runner.name);
   const [startVarsOpen, setStartVarsOpen] = useState(false);
   const [startVarDrafts, setStartVarDrafts] = useState<{ key: string; value: string }[]>([]);
   const [suggestIdx, setSuggestIdx] = useState<number | null>(null);
+  const [saveToast, setSaveToast] = useState(false);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setSaveToast(true);
+    toastTimerRef.current = setTimeout(() => setSaveToast(false), 2000);
+  }, []);
 
   const allRequests: ApiRequest[] = [
     ...collection.requests,
@@ -470,7 +479,8 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     const updated = buildRunnerFromFlow();
     runnerRef.current = updated;
     onSave(updated);
-  }, [buildRunnerFromFlow, onSave]);
+    showToast();
+  }, [buildRunnerFromFlow, onSave, showToast]);
 
   const handleConnect = useCallback((params: Connection) => {
     setEdges(prev => addEdge({
@@ -571,29 +581,70 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     }
   }, [toFlowNodes, toFlowEdges, runnerName]);
 
+  const handleDeleteEdge = useCallback(() => {
+    if (!mappingDialog) return;
+    const hasData = mappingDialog.condition.trim() ||
+      mappingDialog.mappings.some(m => m.fromExpression.trim() || m.toVariable.trim());
+    if (hasData && !confirm('This edge has a condition or mappings configured. Delete it anyway?')) return;
+
+    // Remove from React Flow state only — buildRunnerFromFlow() syncs runnerRef on next Run/Save
+    setEdges(prev => prev.filter(e => e.id !== mappingDialog.edgeId));
+    setMappingDialog(null);
+  }, [mappingDialog, setEdges]);
+
   const handleSaveEdgeDialog = useCallback(() => {
     if (!mappingDialog) return;
     const mappings = mappingDialog.mappings.filter(
       m => m.fromExpression.trim() && m.toVariable.trim(),
     );
     const condition = mappingDialog.condition.trim();
+    const newData = {
+      ...(mappings.length ? { mappings } : {}),
+      ...(condition ? { condition } : {}),
+    };
+    const hasData = Object.keys(newData).length > 0;
 
-    // Rebuild the runner's edge list with the updated data, then re-style
-    const currentRunner = runnerRef.current;
-    const updatedRunnerEdges: RunnerEdge[] = currentRunner.edges.map(e =>
-      e.id !== mappingDialog.edgeId ? e : {
+    // Update only the target edge within the existing React Flow state.
+    // Do NOT rebuild from runnerRef.current — that ref may not yet contain edges
+    // the user drew since the last explicit Save, and rebuilding from it would
+    // silently discard them.
+    setEdges(prev => prev.map(e => {
+      if (e.id !== mappingDialog.edgeId) return e;
+
+      const isConditional = !!condition;
+      const isFollowed = followedEdgeIds.has(e.id);
+      const hasRun = followedEdgeIds.size > 0;
+
+      let stroke = '#0d7377';
+      if (hasRun) stroke = isFollowed ? '#22c55e' : '#333';
+      else if (isConditional) stroke = '#f59e0b';
+
+      const condLabel = condition
+        ? condition.replace(/^return\s+/, '').replace(/;$/, '').slice(0, 36)
+          + (condition.replace(/^return\s+/, '').length > 36 ? '…' : '')
+        : null;
+      const mappingsLabel = mappings.length ? `${mappings.length} ↦` : null;
+      const label = condLabel
+        ? (mappingsLabel ? `if (${condLabel})  ${mappingsLabel}` : `if (${condLabel})`)
+        : mappingsLabel || undefined;
+
+      return {
         ...e,
-        data: {
-          ...(mappings.length ? { mappings } : {}),
-          ...(condition ? { condition } : {}),
+        data: hasData ? newData : undefined,
+        label,
+        labelStyle: { fill: isConditional ? '#f59e0b' : '#aaa', fontSize: 10 },
+        labelBgStyle: { fill: '#111' },
+        markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
+        style: {
+          stroke,
+          strokeWidth: isFollowed ? 2.5 : 2,
+          strokeDasharray: isConditional && !isFollowed ? '6 4' : undefined,
+          opacity: hasRun && isConditional && !isFollowed ? 0.35 : 1,
         },
-      },
-    );
-    runnerRef.current = { ...currentRunner, edges: updatedRunnerEdges };
-
-    setEdges(toFlowEdges(updatedRunnerEdges, followedEdgeIds, followedEdgeIds.size > 0));
+      };
+    }));
     setMappingDialog(null);
-  }, [mappingDialog, setEdges, toFlowEdges, followedEdgeIds]);
+  }, [mappingDialog, setEdges, followedEdgeIds]);
 
   // Derive the selected node's data for the response panel
   const selectedResult = selectedNodeId ? nodeResults[selectedNodeId] : null;
@@ -629,43 +680,84 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         </button>
 
         <div style={{ position: 'relative' }}>
-          <button className="button button-secondary" onClick={() => setShowAddRequest(v => !v)}>
+          <button
+            className="button button-secondary"
+            onClick={() => {
+              setShowAddRequest(v => {
+                if (v) setRequestSearch(''); // clear on close
+                return !v;
+              });
+            }}
+          >
             + Add Request
           </button>
           {showAddRequest && (
             <div style={{
               position: 'absolute', top: '100%', left: 0, marginTop: 4,
               background: '#1e1e1e', border: '1px solid #444', borderRadius: 6,
-              minWidth: 200, maxHeight: 280, overflowY: 'auto',
+              minWidth: 240, maxHeight: 320,
               zIndex: 9999, boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+              display: 'flex', flexDirection: 'column',
             }}>
-              {allRequests.length === 0 ? (
-                <div style={{ padding: '0.75rem', color: '#666', fontSize: '0.8rem' }}>
-                  No requests in collection
-                </div>
-              ) : allRequests.map(req => (
-                <div
-                  key={req.id}
-                  onClick={() => handleAddRequest(req)}
+              {/* Search input */}
+              <div style={{ padding: '0.4rem 0.5rem', borderBottom: '1px solid #333', flexShrink: 0 }}>
+                <input
+                  autoFocus
+                  placeholder="Search requests…"
+                  value={requestSearch}
+                  onChange={e => setRequestSearch(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Escape') { setShowAddRequest(false); setRequestSearch(''); } }}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '0.4rem 0.75rem', cursor: 'pointer',
-                    fontSize: '0.82rem', color: '#e0e0e0',
+                    width: '100%', background: '#111', border: '1px solid #333',
+                    borderRadius: 4, color: '#e0e0e0', fontSize: '0.8rem',
+                    padding: '0.3rem 0.5rem', outline: 'none', boxSizing: 'border-box',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#2a2a2a')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                >
-                  <span style={{
-                    background: '#0d7377', color: '#fff', fontSize: '0.6rem',
-                    fontWeight: 700, padding: '1px 4px', borderRadius: 3, flexShrink: 0,
-                  }}>
-                    {req.method}
-                  </span>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {req.name}
-                  </span>
-                </div>
-              ))}
+                />
+              </div>
+
+              {/* Filtered list */}
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {(() => {
+                  const filtered = allRequests.filter(r =>
+                    r.name.toLowerCase().includes(requestSearch.toLowerCase()) ||
+                    r.method.toLowerCase().includes(requestSearch.toLowerCase()),
+                  );
+                  if (allRequests.length === 0) return (
+                    <div style={{ padding: '0.75rem', color: '#666', fontSize: '0.8rem' }}>
+                      No requests in collection
+                    </div>
+                  );
+                  if (filtered.length === 0) return (
+                    <div style={{ padding: '0.75rem', color: '#666', fontSize: '0.8rem' }}>
+                      No matches for "{requestSearch}"
+                    </div>
+                  );
+                  return filtered.map(req => (
+                    <div
+                      key={req.id}
+                      onClick={() => { handleAddRequest(req); setRequestSearch(''); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '0.4rem 0.75rem', cursor: 'pointer',
+                        fontSize: '0.82rem', color: '#e0e0e0',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = '#2a2a2a')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <span style={{
+                        background: METHOD_COLORS[req.method] || '#0d7377',
+                        color: '#000', fontSize: '0.6rem',
+                        fontWeight: 700, padding: '1px 4px', borderRadius: 3, flexShrink: 0,
+                      }}>
+                        {req.method}
+                      </span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {req.name}
+                      </span>
+                    </div>
+                  ));
+                })()}
+              </div>
             </div>
           )}
         </div>
@@ -699,6 +791,28 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
             <Background color="#333" gap={20} />
             <Controls style={{ background: '#1a1a1a', border: '1px solid #333' }} />
           </ReactFlow>
+
+          {saveToast && (
+            <div style={{
+              position: 'absolute',
+              bottom: '1.25rem',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: '#166534',
+              border: '1px solid #22c55e',
+              color: '#fff',
+              padding: '0.35rem 1rem',
+              borderRadius: 20,
+              fontSize: '0.8rem',
+              fontWeight: 500,
+              pointerEvents: 'none',
+              whiteSpace: 'nowrap',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+              zIndex: 10,
+            }}>
+              ✓ Saved
+            </div>
+          )}
         </div>
 
         {/* Inline response panel — shown when a completed node is selected */}
@@ -953,7 +1067,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
                   {mappingDialog.mappings.map((mapping, idx) => (
                     <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
                       <input
-                        placeholder="body.access_token"
+                        placeholder="e.g. body.access_token or body.items[0].id"
                         value={mapping.fromExpression}
                         onChange={e => {
                           const updated = [...mappingDialog.mappings];
@@ -964,20 +1078,19 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
                         style={{ flex: 1, fontSize: '0.82rem' }}
                       />
                       <span style={{ color: '#555', flexShrink: 0 }}>→</span>
-                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', border: '1px solid #444', borderRadius: 4, background: '#111', overflow: 'hidden' }}>
-                        <span style={{ padding: '0 4px 0 8px', color: '#0d7377', fontSize: '0.82rem', fontFamily: 'monospace', flexShrink: 0, userSelect: 'none' }}>{'{{'}</span>
-                        <input
-                          placeholder="access_token"
-                          value={mapping.toVariable.replace(/^\{\{/, '').replace(/\}\}$/, '')}
-                          onChange={e => {
-                            const updated = [...mappingDialog.mappings];
-                            updated[idx] = { ...updated[idx], toVariable: e.target.value };
-                            setMappingDialog(prev => prev ? { ...prev, mappings: updated } : null);
-                          }}
-                          style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#e0e0e0', fontSize: '0.82rem', padding: '0.4rem 0', fontFamily: 'monospace' }}
-                        />
-                        <span style={{ padding: '0 8px 0 4px', color: '#0d7377', fontSize: '0.82rem', fontFamily: 'monospace', flexShrink: 0, userSelect: 'none' }}>{'}}'}</span>
-                      </div>
+                      <input
+                        placeholder="access_token"
+                        value={mapping.toVariable.replace(/^\{\{/, '').replace(/\}\}$/, '')}
+                        onChange={e => {
+                          const updated = [...mappingDialog.mappings];
+                          // Strip any {{ }} the user may have typed
+                          const clean = e.target.value.replace(/^\{\{/, '').replace(/\}\}$/, '');
+                          updated[idx] = { ...updated[idx], toVariable: clean };
+                          setMappingDialog(prev => prev ? { ...prev, mappings: updated } : null);
+                        }}
+                        className="form-input"
+                        style={{ flex: 1, fontSize: '0.82rem', fontFamily: 'monospace' }}
+                      />
                       <button
                         className="button-secondary button"
                         onClick={() => {
@@ -1002,13 +1115,20 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
 
                   <div style={{ background: '#111', borderRadius: 4, padding: '0.5rem 0.75rem', fontSize: '0.75rem', color: '#666', lineHeight: 1.6, marginTop: '0.25rem' }}>
                     <span style={{ color: '#555', fontWeight: 600 }}>Expressions: </span>
-                    <code style={{ color: '#0d9e9e' }}>body.access_token</code> · <code style={{ color: '#0d9e9e' }}>body.data.id</code> · <code style={{ color: '#0d9e9e' }}>status</code> · <code style={{ color: '#0d9e9e' }}>headers.x-request-id</code>
+                    <code style={{ color: '#0d9e9e' }}>body.access_token</code> · <code style={{ color: '#0d9e9e' }}>body.data.id</code> · <code style={{ color: '#0d9e9e' }}>body.items[0].id</code> · <code style={{ color: '#0d9e9e' }}>status</code> · <code style={{ color: '#0d9e9e' }}>headers.x-request-id</code>
                   </div>
                 </div>
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '0.75rem 1rem', borderTop: '1px solid #333' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '0.75rem 1rem', borderTop: '1px solid #333' }}>
+              <button
+                className="button button-secondary"
+                onClick={handleDeleteEdge}
+                style={{ color: '#f87171', borderColor: '#f87171', marginRight: 'auto' }}
+              >
+                Delete edge
+              </button>
               <button className="button button-secondary" onClick={() => setMappingDialog(null)}>Cancel</button>
               <button className="button" onClick={handleSaveEdgeDialog}>Save</button>
             </div>
