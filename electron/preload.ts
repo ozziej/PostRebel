@@ -50,6 +50,11 @@ export interface ElectronAPI {
   saveSavedResponse: (workspaceId: string, entry: any) => Promise<any>;
   deleteSavedResponse: (workspaceId: string, entryId: string) => Promise<any>;
   renameSavedResponse: (workspaceId: string, entryId: string, newName: string) => Promise<any>;
+
+  // Runner management
+  loadRunners: (workspaceId: string) => Promise<any>;
+  saveRunner: (workspaceId: string, runner: any) => Promise<any>;
+  deleteRunner: (workspaceId: string, runnerId: string) => Promise<any>;
 }
 
 const api: ElectronAPI = {
@@ -102,6 +107,11 @@ const api: ElectronAPI = {
   saveSavedResponse: (workspaceId, entry) => ipcRenderer.invoke('save-saved-response', workspaceId, entry),
   deleteSavedResponse: (workspaceId, entryId) => ipcRenderer.invoke('delete-saved-response', workspaceId, entryId),
   renameSavedResponse: (workspaceId, entryId, newName) => ipcRenderer.invoke('rename-saved-response', workspaceId, entryId, newName),
+
+  // Runner management
+  loadRunners: (workspaceId) => ipcRenderer.invoke('load-runners', workspaceId),
+  saveRunner: (workspaceId, runner) => ipcRenderer.invoke('save-runner', workspaceId, runner),
+  deleteRunner: (workspaceId, runnerId) => ipcRenderer.invoke('delete-runner', workspaceId, runnerId),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

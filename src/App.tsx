@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace, RequestHistoryEntry, SavedResponse } from './types';
+import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace, RequestHistoryEntry, SavedResponse, Runner } from './types';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { CollectionAuthModal } from './components/CollectionAuthModal';
@@ -43,6 +43,8 @@ function App() {
   const [requestHistory, setRequestHistory] = useState<RequestHistoryEntry[]>([]);
   const [savedResponses, setSavedResponses] = useState<SavedResponse[]>([]);
   const [activeSavedResponse, setActiveSavedResponse] = useState<SavedResponse | null>(null);
+  const [runners, setRunners] = useState<Runner[]>([]);
+  const [activeRunner, setActiveRunner] = useState<Runner | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchOptions, setSearchOptions] = useState<SearchOptions>({ caseSensitive: false, wholeWords: false, useRegex: false });
@@ -154,6 +156,16 @@ function App() {
           setSavedResponses(savedResult.entries);
         } else {
           setSavedResponses([]);
+        }
+      }
+
+      // Load runners
+      if (activeWorkspace) {
+        const runnersResult = await window.electronAPI.loadRunners(activeWorkspace.id);
+        if (runnersResult.success) {
+          setRunners(runnersResult.runners || []);
+        } else {
+          setRunners([]);
         }
       }
     } catch (error) {
@@ -356,6 +368,8 @@ function App() {
     setRequestHistory([]);
     setSavedResponses([]);
     setActiveSavedResponse(null);
+    setRunners([]);
+    setActiveRunner(null);
   };
 
   const handleCreateEnvironment = async (name: string) => {
@@ -529,6 +543,7 @@ function App() {
 
   const handleSelectRequest = (request: ApiRequest) => {
     setActiveSavedResponse(null);
+    setActiveRunner(null);
     setActiveRequest(request);
     setCurrentResponse(responseCache[request.id] ?? null);
   };
@@ -537,6 +552,71 @@ function App() {
     setActiveSavedResponse(saved);
     setActiveRequest(saved.request);
     setCurrentResponse(saved.response);
+  };
+
+  const handleSelectRunner = (runner: Runner) => {
+    setActiveRunner(runner);
+    setActiveRequest(null);
+    setActiveSavedResponse(null);
+    setCurrentResponse(null);
+  };
+
+  const handleSaveRunner = async (runner: Runner) => {
+    if (!activeWorkspace) return;
+    await window.electronAPI.saveRunner(activeWorkspace.id, runner);
+    setRunners(prev => {
+      const idx = prev.findIndex(r => r.id === runner.id);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = runner;
+        return updated;
+      }
+      return [...prev, runner];
+    });
+    if (activeRunner?.id === runner.id) {
+      setActiveRunner(runner);
+    }
+  };
+
+  const handleDeleteRunner = async (runnerId: string) => {
+    if (!activeWorkspace) return;
+    if (!confirm('Are you sure you want to delete this runner?')) return;
+    await window.electronAPI.deleteRunner(activeWorkspace.id, runnerId);
+    setRunners(prev => prev.filter(r => r.id !== runnerId));
+    if (activeRunner?.id === runnerId) {
+      setActiveRunner(null);
+    }
+  };
+
+  const handleAddRunner = async (collection: Collection) => {
+    if (!activeWorkspace) return;
+    const now = new Date().toISOString();
+    const startId = `start-${Date.now()}`;
+    const endId = `end-${Date.now() + 1}`;
+    const newRunner: Runner = {
+      id: Date.now().toString(),
+      name: 'New Runner',
+      collectionId: collection.id,
+      workspaceId: activeWorkspace.id,
+      nodes: [
+        { id: startId, type: 'start', position: { x: 250, y: 50 }, data: { label: 'Start' } },
+        { id: endId, type: 'end', position: { x: 250, y: 200 }, data: { label: 'End' } },
+      ],
+      edges: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await window.electronAPI.saveRunner(activeWorkspace.id, newRunner);
+    setRunners(prev => [...prev, newRunner]);
+    setActiveRunner(newRunner);
+    setActiveRequest(null);
+    setActiveSavedResponse(null);
+    setCurrentResponse(null);
+  };
+
+  const handleShowRunnerResponse = (response: ApiResponse, request: ApiRequest) => {
+    setCurrentResponse(response);
+    setActiveRequest(request);
   };
 
   const handleSaveSavedResponse = async (name: string) => {
@@ -750,6 +830,8 @@ function App() {
             collections={collections}
             savedResponses={savedResponses}
             activeSavedResponse={activeSavedResponse}
+            runners={runners}
+            activeRunner={activeRunner}
             onSelectRequest={handleSelectRequest}
             onSelectSavedResponse={handleSelectSavedResponse}
             onDeleteSavedResponse={handleDeleteSavedResponse}
@@ -758,6 +840,9 @@ function App() {
             onDeleteCollection={deleteCollection}
             onDeleteRequest={deleteRequest}
             onEditCollectionAuth={handleEditCollectionAuth}
+            onSelectRunner={handleSelectRunner}
+            onDeleteRunner={handleDeleteRunner}
+            onAddRunner={handleAddRunner}
           />
         </ResizableSidebar>
 
@@ -777,6 +862,12 @@ function App() {
           isReadOnly={activeSavedResponse !== null}
           searchTerm={searchTerm}
           searchOptions={searchOptions}
+          activeRunner={activeRunner}
+          onSaveRunner={handleSaveRunner}
+          onShowRunnerResponse={handleShowRunnerResponse}
+          onAddRunner={handleAddRunner}
+          collections={collections}
+          certificates={certificates}
         />
 
         <ResponsePanel

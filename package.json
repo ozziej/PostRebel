@@ -71,6 +71,7 @@
     }
   },
   "dependencies": {
+    "@xyflow/react": "^12.10.2",
     "axios": "^1.6.0",
     "js-yaml": "^4.1.1",
     "jsonlint-mod": "^1.7.6",

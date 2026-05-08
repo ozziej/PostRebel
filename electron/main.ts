@@ -1000,6 +1000,57 @@ ipcMain.handle('rename-saved-response', async (event, workspaceId, entryId, newN
   }
 });
 
+// Runner management handlers
+ipcMain.handle('load-runners', async (event, workspaceId) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const runnersDir = path.join(workspacePath, 'runners');
+    try {
+      await fs.access(runnersDir);
+    } catch {
+      return { success: true, runners: [] };
+    }
+    const files = await fs.readdir(runnersDir);
+    const jsonFiles = files.filter(f => f.endsWith('.json'));
+    const runners = [];
+    for (const file of jsonFiles) {
+      try {
+        const content = await fs.readFile(path.join(runnersDir, file), 'utf-8');
+        runners.push(JSON.parse(content));
+      } catch {
+        // skip corrupt files
+      }
+    }
+    return { success: true, runners };
+  } catch (error) {
+    return { success: false, runners: [], error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('save-runner', async (event, workspaceId, runner) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const runnersDir = path.join(workspacePath, 'runners');
+    await fs.mkdir(runnersDir, { recursive: true });
+    const filePath = path.join(runnersDir, `${runner.id}.json`);
+    await fs.writeFile(filePath, JSON.stringify(runner, null, 2));
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('delete-runner', async (event, workspaceId, runnerId) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const filePath = path.join(workspacePath, 'runners', `${runnerId}.json`);
+    await shell.trashItem(filePath);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 // HTTP Request handler - runs in Node.js, no CORS restrictions!
 ipcMain.handle('execute-http-request', async (event, requestConfig) => {
   const startTime = Date.now();

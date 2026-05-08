@@ -108,6 +108,51 @@ export interface ApiResponse {
   size: number;
 }
 
+export interface DataMapping {
+  fromExpression: string; // e.g. "body.token" or "status"
+  toVariable: string;     // e.g. "authToken" → used as {{authToken}}
+}
+
+export interface RunnerEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+  data?: { mappings: DataMapping[] };
+}
+
+export interface RunnerNodeData extends Record<string, unknown> {
+  label: string;
+  requestId?: string; // undefined for start/end nodes
+}
+
+export interface RunnerNode {
+  id: string;
+  type: 'start' | 'request' | 'end';
+  position: { x: number; y: number };
+  data: RunnerNodeData;
+}
+
+export interface Runner {
+  id: string;
+  name: string;
+  collectionId: string;
+  workspaceId: string;
+  nodes: RunnerNode[];
+  edges: RunnerEdge[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Runtime-only (not persisted)
+export interface RunnerNodeResult {
+  nodeId: string;
+  status: 'idle' | 'running' | 'success' | 'error';
+  response?: ApiResponse;
+  error?: string;
+}
+
 export interface ScriptContext {
   pm: {
     environment: {
@@ -171,6 +216,11 @@ declare global {
       saveSavedResponse: (workspaceId: string, entry: SavedResponse) => Promise<{ success: boolean; error?: string }>;
       deleteSavedResponse: (workspaceId: string, entryId: string) => Promise<{ success: boolean; error?: string }>;
       renameSavedResponse: (workspaceId: string, entryId: string, newName: string) => Promise<{ success: boolean; error?: string }>;
+
+      // Runner management
+      loadRunners: (workspaceId: string) => Promise<{ success: boolean; runners: Runner[] }>;
+      saveRunner: (workspaceId: string, runner: Runner) => Promise<{ success: boolean; error?: string }>;
+      deleteRunner: (workspaceId: string, runnerId: string) => Promise<{ success: boolean; error?: string }>;
     };
   }
 }

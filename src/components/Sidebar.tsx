@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Collection, Environment, ApiRequest, Workspace, SavedResponse, CollectionFolder } from '../types';
+import { Collection, Environment, ApiRequest, Workspace, SavedResponse, CollectionFolder, Runner } from '../types';
 
 interface SidebarProps {
   activeWorkspace: Workspace | null;
   collections: Collection[];
   savedResponses: SavedResponse[];
   activeSavedResponse: SavedResponse | null;
+  runners: Runner[];
+  activeRunner: Runner | null;
   onSelectRequest: (request: ApiRequest) => void;
   onSelectSavedResponse: (saved: SavedResponse) => void;
   onDeleteSavedResponse: (id: string) => void;
@@ -14,6 +16,9 @@ interface SidebarProps {
   onDeleteCollection: (collectionId: string) => Promise<any>;
   onDeleteRequest: (collectionId: string, requestId: string) => Promise<any>;
   onEditCollectionAuth: (collection: Collection) => void;
+  onSelectRunner: (runner: Runner) => void;
+  onDeleteRunner: (runnerId: string) => void;
+  onAddRunner: (collection: Collection) => void;
 }
 
 interface DragItem {
@@ -34,6 +39,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collections,
   savedResponses,
   activeSavedResponse,
+  runners,
+  activeRunner,
   onSelectRequest,
   onSelectSavedResponse,
   onDeleteSavedResponse,
@@ -42,7 +49,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteCollection,
   onDeleteRequest,
   onEditCollectionAuth,
+  onSelectRunner,
+  onDeleteRunner,
+  onAddRunner,
 }) => {
+  const [addDropdownOpenId, setAddDropdownOpenId] = useState<string | null>(null);
+  const [editingRunner, setEditingRunner] = useState<string | null>(null);
   const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
   const [expandedRequests, setExpandedRequests] = useState<Set<string>>(new Set());
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -638,17 +650,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </>
                 ) : (
                   <>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        addRequestToCollection(collection);
-                      }}
-                      style={{ fontSize: '0.8rem', padding: '0.2rem 0.4rem' }}
-                      className="button"
-                      title="Add request"
-                    >
-                      +
-                    </button>
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAddDropdownOpenId(addDropdownOpenId === collection.id ? null : collection.id);
+                        }}
+                        style={{ fontSize: '0.8rem', padding: '0.2rem 0.4rem' }}
+                        className="button"
+                        title="Add to collection"
+                      >
+                        +
+                      </button>
+                      {addDropdownOpenId === collection.id && (
+                        <div style={{
+                          position: 'absolute',
+                          top: '100%',
+                          right: 0,
+                          marginTop: 4,
+                          background: '#1e1e1e',
+                          border: '1px solid #444',
+                          borderRadius: 6,
+                          zIndex: 9999,
+                          minWidth: 140,
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                        }}>
+                          <div
+                            onClick={(e) => { e.stopPropagation(); setAddDropdownOpenId(null); addRequestToCollection(collection); }}
+                            style={{ padding: '0.4rem 0.75rem', cursor: 'pointer', fontSize: '0.82rem', color: '#e0e0e0' }}
+                            onMouseEnter={e => (e.currentTarget.style.background = '#2a2a2a')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            New Request
+                          </div>
+                          <div
+                            onClick={(e) => { e.stopPropagation(); setAddDropdownOpenId(null); onAddRunner(collection); setExpandedCollections(prev => new Set([...prev, collection.id])); }}
+                            style={{ padding: '0.4rem 0.75rem', cursor: 'pointer', fontSize: '0.82rem', color: '#e0e0e0' }}
+                            onMouseEnter={e => (e.currentTarget.style.background = '#2a2a2a')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            New Runner
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1054,6 +1099,67 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                   );
                 })}
+
+                {/* Runners for this collection */}
+                {runners.filter(r => r.collectionId === collection.id).map(runner => (
+                  <div
+                    key={runner.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.5rem 0.75rem 0.5rem 0.5rem',
+                      cursor: 'pointer',
+                      backgroundColor: activeRunner?.id === runner.id ? '#0d737720' : 'transparent',
+                      borderTop: '1px solid #333',
+                    }}
+                    onClick={() => onSelectRunner(runner)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                      <span className="http-method RUNNER" style={{
+                        background: '#7c3aed',
+                        color: '#fff',
+                        fontSize: '0.55rem',
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: 4,
+                        flexShrink: 0,
+                        letterSpacing: '0.5px',
+                      }}>
+                        RUNNER
+                      </span>
+                      {editingRunner === runner.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="form-input"
+                          style={{ fontSize: '0.85rem', flex: 1, marginRight: '0.5rem' }}
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter') {
+                              setEditingRunner(null);
+                            }
+                          }}
+                          onBlur={() => setEditingRunner(null)}
+                          onClick={(e) => e.stopPropagation()}
+                          autoFocus
+                        />
+                      ) : (
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.82rem', color: activeRunner?.id === runner.id ? '#0d9e9e' : '#e0e0e0' }}>
+                          {runner.name}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDeleteRunner(runner.id); }}
+                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                      className="button-secondary button"
+                      title="Delete runner"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>

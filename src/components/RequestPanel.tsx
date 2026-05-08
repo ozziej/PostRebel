@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ApiRequest, Environment, RequestHistoryEntry, Collection } from '../types';
+import { ApiRequest, ApiResponse, Environment, RequestHistoryEntry, Collection, Runner, Certificate } from '../types';
 import { KeyValueEditor } from './KeyValueEditor';
 import { VariableInput } from './VariableInput';
 import { SearchOptions } from './SearchBar';
 import { findMatches, highlightText } from '../utils/searchHighlight';
+import { RunnerCanvas } from './RunnerCanvas';
 import jsonlint from 'jsonlint-mod';
 
 function formatRelativeTime(isoDate: string): string {
@@ -46,6 +47,12 @@ interface RequestPanelProps {
   isReadOnly?: boolean;
   searchTerm?: string;
   searchOptions?: SearchOptions;
+  activeRunner?: Runner | null;
+  onSaveRunner?: (runner: Runner) => void;
+  onShowRunnerResponse?: (response: ApiResponse, request: ApiRequest) => void;
+  onAddRunner?: (collection: Collection) => void;
+  collections?: Collection[];
+  certificates?: Certificate[];
 }
 
 export const RequestPanel: React.FC<RequestPanelProps> = ({
@@ -60,8 +67,14 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   isReadOnly = false,
   searchTerm = '',
   searchOptions = { caseSensitive: false, wholeWords: false, useRegex: false },
+  activeRunner = null,
+  onSaveRunner,
+  onShowRunnerResponse,
+  onAddRunner,
+  collections = [],
+  certificates = [],
 }) => {
-  const [activeTab, setActiveTab] = useState<'headers' | 'body' | 'auth' | 'scripts'>('headers');
+  const [activeTab, setActiveTab] = useState<'headers' | 'body' | 'auth' | 'scripts' | 'runner'>('headers');
   const [localRequest, setLocalRequest] = useState<ApiRequest | null>(null);
   const [jsonValidation, setJsonValidation] = useState<{ valid: boolean; message: string } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -70,6 +83,13 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   useEffect(() => {
     setLocalRequest(request);
   }, [request]);
+
+  // Auto-switch to runner tab when activeRunner changes
+  useEffect(() => {
+    if (activeRunner) {
+      setActiveTab('runner');
+    }
+  }, [activeRunner?.id]);
 
   // Debounced JSON validation (only when raw subtype is json)
   const isJsonRaw = localRequest?.body?.type === 'raw' && (localRequest.body.rawSubtype || 'json') === 'json';
@@ -108,6 +128,34 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
     const matches = findMatches(text, searchTerm, searchOptions);
     return highlightText(text, matches);
   };
+
+  // If a runner is active, show the runner canvas
+  if (activeRunner) {
+    const runnerCollection = collections.find(c => c.id === activeRunner.collectionId);
+    return (
+      <div className="request-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div className="request-tabs">
+          <button className="tab active">runner</button>
+        </div>
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          {runnerCollection ? (
+            <RunnerCanvas
+              runner={activeRunner}
+              collection={runnerCollection}
+              activeEnvironment={environment}
+              certificates={certificates}
+              onSave={onSaveRunner || (() => {})}
+              onShowResponse={onShowRunnerResponse || (() => {})}
+            />
+          ) : (
+            <div style={{ padding: '2rem', color: '#666', textAlign: 'center' }}>
+              Collection not found for this runner.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!localRequest) {
     return (
@@ -298,6 +346,12 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
           onClick={() => setActiveTab('scripts')}
         >
           Scripts
+        </button>
+        <button
+          className={`tab ${activeTab === 'runner' ? 'active' : ''}`}
+          onClick={() => setActiveTab('runner')}
+        >
+          Runner
         </button>
       </div>
 
@@ -725,6 +779,39 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === 'runner' && (
+        <div style={{ padding: '2rem', textAlign: 'center' }}>
+          <div style={{
+            border: '1px dashed #444',
+            borderRadius: 8,
+            padding: '2rem',
+            maxWidth: 360,
+            margin: '0 auto',
+          }}>
+            <div style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>▶</div>
+            <div style={{ color: '#e0e0e0', fontWeight: 600, marginBottom: '0.5rem' }}>
+              Create a Runner
+            </div>
+            <div style={{ color: '#888', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+              Chain multiple requests together, pass data between them, and execute them in sequence.
+            </div>
+            {activeCollection && onAddRunner ? (
+              <button
+                className="button"
+                onClick={() => onAddRunner(activeCollection)}
+                style={{ background: '#7c3aed', borderColor: '#9333ea' }}
+              >
+                + New Runner for "{activeCollection.name}"
+              </button>
+            ) : (
+              <div style={{ color: '#666', fontSize: '0.82rem' }}>
+                Use the + button on a collection in the sidebar to create a runner.
+              </div>
+            )}
+          </div>
         </div>
       )}
 
