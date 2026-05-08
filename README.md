@@ -3,6 +3,8 @@
 
 A local API testing tool with git support - your Postman alternative.
 
+![PostRebel main screen](docs/Main%20Screen%20Example.png)
+
 ## Features
 
 ✅ **Current Features:**
@@ -265,6 +267,8 @@ if (response.access_token) {
 ### Collection Runner
 
 The Collection Runner lets you chain multiple requests together into a visual flow diagram, pass data between them, branch on conditions, and execute the whole sequence with live status feedback — without writing any glue code.
+
+![Collection Runner flow diagram](docs/Flow%20Diagram%20Example.png)
 
 #### Creating a runner
 
