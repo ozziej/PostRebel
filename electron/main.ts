@@ -179,7 +179,7 @@ const createWindow = async () => {
     mainWindow.loadURL('http://localhost:3000');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 };
 
@@ -1093,7 +1093,8 @@ ipcMain.handle('execute-http-request', async (event, requestConfig) => {
     const response = await axios(config);
     const endTime = Date.now();
 
-    const contentType: string = (response.headers['content-type'] || '').toLowerCase();
+    const contentTypeRaw = response.headers['content-type'];
+    const contentType: string = (Array.isArray(contentTypeRaw) ? contentTypeRaw[0] : (contentTypeRaw || '')).toString().toLowerCase();
     const rawBuffer: Buffer = Buffer.from(response.data);
     const byteSize = rawBuffer.length;
 
