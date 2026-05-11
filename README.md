@@ -31,7 +31,7 @@ A local API testing tool with git support - your Postman alternative.
 - **Find in request/response** - `Cmd+F` / `Ctrl+F` searches across all request and response content with plain text, case-sensitive, whole-word, and regex modes
 - **Keyboard shortcuts** - Configurable shortcuts for common actions (Send: `Cmd+Enter` / `Ctrl+Enter`); customise in Settings
 - **Image responses** - APIs that return images (`image/*`) display the image inline with download and actual-size controls
-- **Collection Runner** - Chain multiple requests into a visual flow diagram, pass data between them via response mappings, branch on conditions with JavaScript, and view each node's response inline
+- **Collection Runner** - Visual flow-based runner with Request, Delay, and For Each node types; JavaScript conditional branching; per-edge data mappings and output expressions; execution log with `console.log` support; Start-node variable overrides; and inline request+response inspection per node
 
 ## Search and Find
 
@@ -266,93 +266,67 @@ if (response.access_token) {
 
 ### Collection Runner
 
-The Collection Runner lets you chain multiple requests together into a visual flow diagram, pass data between them, branch on conditions, and execute the whole sequence with live status feedback — without writing any glue code.
+The Collection Runner lets you chain multiple requests together into a visual flow diagram, pass data between them, branch on conditions, iterate over arrays, insert delays, and execute the whole sequence with live status feedback.
 
 ![Collection Runner flow diagram](docs/Flow%20Diagram%20Example.png)
 
-#### Creating a runner
+#### Node types
 
-1. Click the **+** button on any collection in the sidebar.
-2. Select **New Runner** from the dropdown.
-3. The runner appears under the collection with a purple **RUNNER** badge.
-4. Click it to open the canvas, which starts with a **Start** and **End** node.
+| Node | Purpose |
+|------|---------|
+| **Start** (green circle) | Entry point — click to set per-run variable overrides |
+| **Request** (dark card) | Executes one API request from the collection |
+| **Delay** (amber card) | Pauses for a configurable number of milliseconds |
+| **For Each** (indigo card) | Iterates over an array, running a sub-sequence per item |
+| **End** (red circle) | Marks the end of a path |
 
 #### Building the flow
 
-- Click **+ Add Request** in the toolbar and pick any request from the collection. A new node is added to the canvas.
-- **Connect nodes** by dragging from the bottom handle of one node to the top handle of the next.
-- Drag nodes to rearrange them on the canvas. Changes are saved when you click **Save** or blur the runner name field.
+- **+ Add Request** — searchable dropdown listing all requests in the collection; new nodes appear at the centre of the visible canvas.
+- **⏱ Delay** and **↻ For Each** buttons add those node types at the canvas centre.
+- **Connect nodes** by dragging from a bottom handle to a top handle.
+- **Reconnect an edge** by dragging either of its endpoints to a new node.
+- **Delete a node** by hovering it and clicking the red **✕** that appears — the node and all its edges are removed (with confirmation).
 
-#### Viewing results
+#### Viewing requests and responses
 
-After clicking **▶ Run**, each node shows a live status badge:
+Click any completed node to open a split panel on the right:
+- **Request section** — shows the resolved URL (with `{{variables}}` substituted), headers, and body exactly as sent.
+- **Response section** — shows status, timing, body, and headers.
 
-| Badge | Meaning |
-|-------|---------|
-| `…` amber | Currently executing |
-| `✓` green | Succeeded (2xx) |
-| `✗` red | Failed (4xx / 5xx / network error) |
+#### Execution log
 
-**Click any completed node** to open an inline response panel on the right showing the full Body and Headers for that node. You can inspect both a successful node and a failed node at the same time without leaving the runner view.
+The log panel opens automatically on Run and records every step — node execution, condition evaluations (passed/skipped), mapped values, and `console.log()` output from condition scripts. Toggle it with the **Log** toolbar button.
 
-#### Passing data between requests (mappings)
+#### Edge settings (click any edge)
 
-Click any **edge** (the arrow between two nodes) to open the Edge Settings dialog, then go to the **Data Mappings** tab.
-
-| Field | Example |
-|-------|---------|
-| From response | `body.access_token` |
-| Save as variable | `access_token` |
-
-The extracted value is then available as `{{access_token}}` in all downstream request URLs, headers, auth fields, and bodies. Supported expressions:
-
-- `body.fieldName` — JSON field in the response body (dot-notation for nested: `body.data.id`)
-- `status` — HTTP status code as a string
-- `statusText` — e.g. `"OK"`, `"Not Found"`
-- `headers.content-type` — any response header (case-insensitive)
-
-Mappings only apply when the edge they are on is actually followed.
-
-#### Conditional branching (if / else)
-
-Click an edge and go to the **Condition (if)** tab. Write JavaScript that returns `true` to follow this edge or `false` to skip it. Leave blank for an unconditional edge (always followed, acts as the *else* path).
+**Condition (if) tab** — JavaScript that returns `true` to follow the edge, `false` to skip it. Unconditional edges act as the *else* fallback.
 
 ```javascript
-// Follow this edge only on a successful response
 return status === 200;
-
-// Check a field in the JSON body
 return body.success === true;
-
-// Ensure a token was actually returned
 return body.access_token !== undefined;
-
-// Range check
-return status >= 200 && status < 300;
-
-// Use a previously extracted variable
-return variables.retry_count < 3;
 ```
 
-Available identifiers: `status`, `body`, `headers`, `variables`, `response` (full object).
+**Data Mappings tab** — extract a value from the response and inject it as a variable for downstream requests (`body.access_token` → `access_token` → use as `{{access_token}}`). Array indexing is supported: `body.items[0].id`.
 
-**Evaluation order** — When a node has multiple outgoing edges, conditional edges are checked first (in draw order); the first one that returns `true` is followed. Any unconditional edge acts as the *else* fallback. If no edge matches, the run stops at that node.
+**Output tab** — log a value when this edge is followed (e.g. `body.description`). Appears in the execution log as `▶ expression: value`.
 
-**Edge colours:**
+#### Start node — variable overrides
 
-| Colour | Meaning |
-|--------|---------|
-| Teal solid | Unconditional (no condition set) |
-| Amber dashed | Conditional, not yet run |
-| Green solid | Followed during the last run |
-| Dimmed | Skipped (condition returned false) |
+Click the Start node to override environment variables for that run only. Values here take precedence over the active environment and are never written back to it. Useful for pointing at a staging URL or pinning a test user ID without changing your environment.
 
-#### Export and import
+#### For Each node
 
-- **Export** — Downloads the runner as a `.runner.json` file for sharing or backup.
-- **Import** — Loads a previously exported runner JSON file onto the canvas.
+Configure an **array source** (`body.advances` or a variable name) and an **item variable prefix** (`advance`). Each item's fields are injected as `{{advance_fieldName}}`; the full item is available as `{{advance}}`. The node has two source handles: **body** (bottom-left, the per-item sequence) and **done** (bottom-right, where to continue after all items).
 
-Runner files are also committed to git alongside collections and environments (`{workspace}/runners/`).
+#### Saving and reverting
+
+- **Save** / blur the runner name to persist changes.
+- **Revert** to discard unsaved changes and restore the last saved version.
+- **Export / Import** runner state as `.runner.json` for sharing or backup.
+
+Runner files are committed to git alongside collections (`{workspace}/runners/`). See [Collection Runner guide](docs/collection-runner.md) for full documentation.
 
 ### Importing
 
@@ -521,7 +495,7 @@ npm run dist         # Create distributable packages
     - ✅ **Find (in request and response)** - Press `Ctrl+F` / `Cmd+F` to search across all request and response content with regex support
     - ✅ **Configurable Shortcut keys for UI** - Customizable keyboard shortcuts including Send request (`Cmd+Enter`/`Ctrl+Enter`), configurable in Settings
     - ✅ **Image support in Response (Binary Data)** - View images directly in response panel with download and zoom controls
-- ✅ **Collection Runner** - Visual flow-based runner with data mappings, conditional JavaScript branching, and inline per-node response inspection
+- ✅ **Collection Runner** - Visual flow-based runner: Request / Delay / For Each nodes, JavaScript conditions, data mappings, edge output expressions, execution log, Start-node variable overrides, inline request+response inspection
 
 🚧 **Planned:**
 - Collection export (Postman v2, OpenAPI)

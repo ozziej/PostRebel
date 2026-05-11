@@ -1,6 +1,6 @@
 # Collection Runner
 
-The Collection Runner lets you chain multiple requests together into a visual flow diagram, pass data between them, branch on conditions, and execute the whole sequence in one click.
+The Collection Runner lets you chain multiple requests together into a visual flow diagram, pass data between them, branch on conditions, iterate over arrays, insert delays, and execute the whole sequence in one click.
 
 ## Overview
 
@@ -15,11 +15,27 @@ A Runner belongs to a collection and is displayed in the sidebar beneath it with
 
 ## The Canvas
 
-The canvas opens inside the request panel area, replacing the normal request editor. It contains:
+The canvas fills the full panel area when a runner is active. It contains:
 
-- **Toolbar** at the top: runner name field, Run button, Add Request, Save, Export, Import.
-- **Flow area**: nodes and edges you arrange visually.
-- **Inline response panel**: slides in on the right when you click a completed node.
+- **Toolbar** at the top (see below).
+- **Flow area** — nodes and edges you arrange visually.
+- **Inline request / response panel** — slides in on the right when you click a completed node.
+- **Execution log panel** — collapsible strip at the bottom, auto-opens on Run.
+
+### Toolbar
+
+| Button | Purpose |
+|--------|---------|
+| Runner name field | Rename the runner (auto-saves on blur) |
+| **▶ Run** | Execute the flow |
+| **+ Add Request** | Searchable dropdown — pick any request from the collection |
+| **⏱ Delay** | Add a Delay node at the centre of the canvas |
+| **↻ For Each** | Add a For Each node at the centre of the canvas |
+| **Save** | Persist current state to disk |
+| **Revert** | Discard unsaved changes and reload the last saved version |
+| **Export** | Download runner as `.runner.json` |
+| **Import** | Load a runner from a `.runner.json` file |
+| **Log** | Toggle the execution log panel (badge shows entry count) |
 
 ### Node types
 
@@ -27,11 +43,19 @@ The canvas opens inside the request panel area, replacing the normal request edi
 |------|-----------|---------|
 | **Start** | Green circle | Entry point — every run begins here |
 | **Request** | Dark card | Executes one API request from the collection |
-| **End** | Red circle | Marks the end of a path (optional but recommended) |
+| **Delay** | Amber card | Pauses execution for a configurable number of milliseconds |
+| **For Each** | Indigo card | Iterates over an array, running a sub-sequence per item |
+| **End** | Red circle | Marks the end of a path |
 
 ### Connecting nodes
 
 Drag from the **bottom handle** of any node to the **top handle** of the next node to create an edge. You can draw multiple edges out of one node to create branches.
+
+To **reconnect** an existing edge, drag either endpoint (source or target) to a new node. This preserves any condition, mappings, and output already configured on the edge.
+
+### Deleting nodes
+
+Hover over any node (except Start) to reveal a red **✕** button in the top-right corner. Clicking it shows a confirmation prompt and then removes the node together with all its connected edges.
 
 ## Running
 
@@ -45,24 +69,50 @@ Click **▶ Run** in the toolbar. Each node updates in real time:
 
 The run follows the connected path from Start to End (or until no matching edge is found).
 
-## Viewing Node Responses
+## Viewing Node Requests and Responses
 
-Click any node that has finished executing (success **or** failure) to open the inline response panel. The panel shows:
+Click any completed node (success **or** failure) to open the inline panel on the right. The panel is split into two sections separated by a labelled divider:
 
-- **Status code and text** in the header bar
-- **Timing and size** stats
-- **Body tab** — full response body, JSON objects pretty-printed
-- **Headers tab** — all response headers
+**Request (top)**
+- Method badge and resolved URL (with `{{variables}}` substituted to their actual values)
+- **Headers** and **Body** tabs showing exactly what was sent
 
-Click a different node to switch to its response. Click the `✕` to close the panel. Both the canvas and the panel are visible at the same time so you can inspect multiple results without losing your view of the flow.
+**Response (bottom)**
+- Status code, timing, and size
+- **Headers** and **Body** tabs
 
-## Passing Data Between Requests
+Click a different node to switch the panel to that node's data. Click **✕** to close.
 
-Click any **edge** (arrow) to open the **Edge Settings** dialog.
+## Execution Log
 
-### Data Mappings tab
+The execution log panel opens automatically when you click **▶ Run**. It records every step:
 
-Extract a value from the source node's response and save it as a `{{variable}}` for downstream requests.
+| Colour | Meaning |
+|--------|---------|
+| Grey | Info — node started, for-each item progress |
+| Green | Success — node completed, condition followed, output value |
+| Amber | Warn — 4xx response |
+| Red | Error — node failed, condition script error |
+| Teal | Script — `console.log()` output from condition scripts |
+
+You can also call `console.log(...)` inside any condition script and the output appears in the log.
+
+Click **Clear** to empty the log, or **✕** to collapse the panel. The **Log** toolbar button shows a badge with the entry count.
+
+## Start Node — Variable Overrides
+
+Click the **Start** node to set variable overrides that apply for the duration of that run only. These values take precedence over the active environment and are **never written back to it**.
+
+**Use cases:**
+- Point `base_url` at a staging server without touching your dev environment
+- Pin a specific `user_id` or `account_id` for the test flow
+- Inject a known/expired token to test auth failure paths
+
+When overrides are set, the Start node displays a purple badge showing the count.
+
+## Passing Data Between Requests (Mappings)
+
+Click any **edge** to open **Edge Settings**, then go to the **Data Mappings** tab.
 
 | Field | Description | Example |
 |-------|-------------|---------|
@@ -71,7 +121,7 @@ Extract a value from the source node's response and save it as a `{{variable}}` 
 
 The variable is then available as `{{access_token}}` in any downstream request URL, header, auth field, or body.
 
-#### Supported expressions
+#### Supported path expressions
 
 | Expression | What it extracts |
 |-----------|-----------------|
@@ -84,56 +134,47 @@ The variable is then available as `{{access_token}}` in any downstream request U
 | `statusText` | HTTP status text (e.g. `"OK"`) |
 | `headers.content-type` | Response header value (case-insensitive) |
 
-Mappings are only applied when the edge they are on is actually followed (relevant for conditional branching).
+Mappings are only applied when the edge they are on is actually followed.
 
 ## Conditional Branching
 
-Click an edge and open the **Condition (if)** tab to add a JavaScript condition. The script must `return true` to follow the edge or `return false` to skip it. Leave blank for an unconditional edge.
+Click an edge and open the **Condition (if)** tab. Write JavaScript that returns `true` to follow this edge or `false` to skip it. Leave blank for an unconditional edge (always followed — acts as the *else* path).
 
-### Execution order
+#### Execution order
 
-When a request node has multiple outgoing edges:
+When a node has multiple outgoing edges:
 
-1. **Conditional edges are evaluated first** (in the order they were drawn).
+1. **Conditional edges are evaluated first** (in draw order).
 2. The **first edge whose condition returns `true`** is followed.
-3. If no conditional edge matches, the **first unconditional edge** (blank condition) is followed as the *else* / default path.
+3. If no conditional edge matches, the **first unconditional edge** is followed as the *else* fallback.
 4. If nothing matches, the run stops at that node.
 
-This lets you build `if / else if / else` chains using multiple edges out of one node.
-
-### Available identifiers
+#### Available identifiers
 
 | Name | Type | Description |
 |------|------|-------------|
 | `status` | `number` | HTTP status code, e.g. `200` |
 | `body` | `any` | Parsed response body (JSON object, or string for non-JSON) |
 | `headers` | `object` | Response headers |
-| `variables` | `object` | Current environment variables (including any mapped values) |
+| `variables` | `object` | Current environment variables (including mapped values) |
 | `response` | `object` | Full response: `{ status, statusText, body, headers }` |
 
-### Examples
+#### Examples
 
 ```javascript
-// Success path
 return status === 200;
-
-// Check a JSON field
 return body.success === true;
-
-// Ensure a token was returned
 return body.access_token !== undefined;
-
-// Any 2xx
 return status >= 200 && status < 300;
-
-// Use a previously mapped variable
 return variables.retry_count < 3;
-
-// Check an array has results
 return Array.isArray(body.items) && body.items.length > 0;
+
+// console.log is available and appears in the execution log
+console.log('token:', body.access_token);
+return !!body.access_token;
 ```
 
-### Edge colour legend
+#### Edge colour legend
 
 | Colour | Meaning |
 |--------|---------|
@@ -142,39 +183,75 @@ return Array.isArray(body.items) && body.items.length > 0;
 | Green solid | Followed during the last run |
 | Dimmed / grey | Skipped (condition returned false, or run didn't reach it) |
 
-## Typical Auth Flow Example
+## Edge Output
 
-A common pattern: authenticate first, extract the token, then use it in subsequent requests.
+Click an edge and open the **Output** tab to log a value when that edge is followed. Useful on edges that lead to the End node to surface a final result.
 
-**Setup:**
+```
+body.description        → logs the description field from the last response
+{{access_token}}        → logs the value of a mapped variable
+status                  → logs the HTTP status code
+```
 
-1. Add three requests to your collection: `Login`, `Get Profile`, `Handle Error`.
-2. Create a runner and add all three as nodes.
-3. Connect: `Start → Login → [branch] → End`
-4. On the edge `Login → Get Profile`:
-   - **Condition**: `return status === 200;`
-   - **Mapping**: `body.access_token` → `access_token`
-5. On the edge `Login → Handle Error`:
-   - **Condition**: leave blank (unconditional / else)
-6. On `Get Profile`, set Auth → Bearer Token: `{{access_token}}`
-7. Click **▶ Run**
+The value appears in the execution log as a green `▶ expression: value` entry.
 
-After running, click the `Login` node to see the auth response and confirm the token was present, then click `Get Profile` to see its response.
+## Delay Node
 
-## Saving
+Click **⏱ Delay** in the toolbar to add a Delay node, then click the node to set the duration in milliseconds. Drop it between any two nodes — the runner waits before continuing.
 
-- Click **Save** in the toolbar, or edit the runner name field and press Tab/click away.
-- Runner state (nodes, edges, conditions, mappings, positions) is persisted immediately.
-- Runner files are committed to git as part of the workspace.
+**Use cases:** rate limiting, waiting for a background job to process before polling.
+
+## For Each Node
+
+Click **↻ For Each** in the toolbar to add a For Each node, then click it to configure:
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| Array source | A dot-notation path into the last response, or a variable name holding a JSON array | `body.advanceBalance.advances` or `advances` |
+| Item variable prefix | Prefix for injected variables | `advance` |
+
+Each item's fields are injected as `{{advance_fieldName}}` (e.g. `{{advance_advancesUuid}}`). The full item JSON is available as `{{advance}}`.
+
+### For Each handles
+
+The For Each node has **two source handles** at the bottom:
+
+| Handle | Position | Purpose |
+|--------|---------|---------|
+| **body** | Bottom-left | The request(s) to run for each item |
+| **done** | Bottom-right | Where to continue after all items complete |
+
+Connect **body** to the per-item request node(s), and **done** to wherever the flow should go after the loop finishes.
+
+## Saving and Reverting
+
+- Click **Save** or blur the runner name to persist all changes.
+- Click **Revert** to discard any unsaved changes and restore the last saved version. A confirmation is shown before reverting.
+- Runner state (nodes, edges, positions, conditions, mappings, outputs) is stored in `{workspace}/runners/` and committed to git.
 
 ## Export / Import
 
-- **Export** — Downloads the runner as a `.runner.json` file. Useful for sharing or backup.
+- **Export** — Downloads the runner as a `.runner.json` file for sharing or backup.
 - **Import** — Opens a file picker; loads nodes, edges, conditions, and mappings from a previously exported file. The current canvas is replaced.
 
-## Storage
+## Typical Auth Flow Example
 
-Runners are stored at:
+1. Add three requests to your collection: `Login`, `Get Profile`, `Handle Error`.
+2. Create a runner and add all three as nodes.
+3. Connect: `Start → Login → [branch]`
+4. On the edge `Login → Get Profile`:
+   - **Condition**: `return status === 200;`
+   - **Mappings**: `body.access_token` → `access_token`
+   - **Output**: `body.description`
+5. On the edge `Login → Handle Error`:
+   - Condition: leave blank (the *else* path)
+6. Connect both branches to `End`.
+7. On `Get Profile`, set Auth → Bearer Token: `{{access_token}}`
+8. Click **▶ Run**
+
+After running, check the execution log for the output value, then click any node to inspect its full request and response.
+
+## Storage
 
 ```
 {workspaces}/
@@ -185,8 +262,7 @@ Runners are stored at:
 
 Each file is a self-contained JSON object with `nodes`, `edges`, `name`, `collectionId`, and timestamps. Runner files are committed to git (not gitignored).
 
-## Limitations (current)
+## Limitations
 
-- **Linear / branching flows only** — no loops or parallel execution.
+- **Branching flows only** — no loop-back edges or parallel execution.
 - **One collection per runner** — all request nodes must come from the runner's parent collection.
-- **No retry logic** — use condition edges to route to a retry node manually if needed.

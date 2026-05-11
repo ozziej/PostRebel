@@ -371,3 +371,16 @@ input[type="checkbox"] {
 .kv-row.disabled {
   opacity: 0.5;
 }
+
+/* ── React Flow controls ── */
+.react-flow__controls-button {
+  background: #2a2a2a !important;
+  border-color: #444 !important;
+  fill: #d0d0d0 !important;
+}
+.react-flow__controls-button:hover {
+  background: #383838 !important;
+}
+.react-flow__controls-button svg {
+  fill: #d0d0d0;
+}

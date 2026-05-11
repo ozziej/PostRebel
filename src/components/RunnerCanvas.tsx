@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import {
   ReactFlow,
   addEdge,
+  reconnectEdge,
   Background,
   Controls,
   useNodesState,
@@ -14,10 +15,10 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
-  Runner, RunnerNode, RunnerEdge, RunnerNodeResult,
+  Runner, RunnerNode, RunnerEdge, RunnerNodeResult, RunnerLogEntry,
   Collection, Environment, Certificate, ApiRequest, ApiResponse, DataMapping,
 } from '../types';
-import { StartNode, RequestNode, EndNode } from './RunnerNodes';
+import { StartNode, RequestNode, EndNode, DelayNode, ForEachNode } from './RunnerNodes';
 import { executeRunner } from '../utils/runnerExecutor';
 
 // Node types must be defined outside the component to avoid re-creation on render
@@ -25,6 +26,8 @@ const nodeTypes: NodeTypes = {
   start: StartNode as any,
   request: RequestNode as any,
   end: EndNode as any,
+  delay: DelayNode as any,
+  foreach: ForEachNode as any,
 };
 
 interface RunnerCanvasProps {
@@ -40,7 +43,8 @@ interface MappingDialogState {
   edgeId: string;
   condition: string;
   mappings: DataMapping[];
-  activeTab: 'condition' | 'mappings';
+  output: string;
+  activeTab: 'condition' | 'mappings' | 'output';
 }
 
 // ── Inline response panel ─────────────────────────────────────────────────────
@@ -75,28 +79,62 @@ const METHOD_COLORS: Record<string, string> = {
 };
 
 const InlineResponsePanel: React.FC<ResponsePanelProps> = ({ nodeLabel, method, result, onClose }) => {
-  const [tab, setTab] = useState<'body' | 'headers'>('body');
+  const [resTab, setResTab] = useState<'body' | 'headers'>('body');
+  const [reqTab, setReqTab] = useState<'headers' | 'body'>('body');
   const response = result.response;
+  const request = result.request;
+
+  const sectionLabel = (text: string) => (
+    <div style={{
+      padding: '0.2rem 0.75rem',
+      background: '#111',
+      borderBottom: '1px solid #1e1e1e',
+      flexShrink: 0,
+    }}>
+      <span style={{ fontSize: '0.62rem', color: '#444', textTransform: 'uppercase', letterSpacing: '0.6px', fontWeight: 700 }}>
+        {text}
+      </span>
+    </div>
+  );
+
+  const tabBar = (
+    tabs: string[],
+    active: string,
+    onChange: (t: any) => void,
+    counts?: Record<string, number>,
+  ) => (
+    <div style={{ display: 'flex', borderBottom: '1px solid #1e1e1e', background: '#0d0d0d', flexShrink: 0 }}>
+      {tabs.map(t => (
+        <button key={t} onClick={() => onChange(t)} style={{
+          background: 'none', border: 'none',
+          borderBottom: active === t ? '2px solid #0d7377' : '2px solid transparent',
+          color: active === t ? '#0d9e9e' : '#666',
+          padding: '0.28rem 0.65rem',
+          cursor: 'pointer', fontSize: '0.75rem', fontWeight: active === t ? 600 : 400,
+          textTransform: 'capitalize',
+        }}>
+          {t}
+          {counts?.[t] !== undefined && (
+            <span style={{ marginLeft: 3, fontSize: '0.65rem', color: '#444' }}>({counts[t]})</span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div style={{
-      width: 380,
-      flexShrink: 0,
-      display: 'flex',
-      flexDirection: 'column',
+      width: 380, flexShrink: 0,
+      display: 'flex', flexDirection: 'column',
       borderLeft: '1px solid #2a2a2a',
-      background: '#0f0f0f',
-      overflow: 'hidden',
+      background: '#0f0f0f', overflow: 'hidden',
     }}>
-      {/* Panel header */}
+      {/* ── Panel header ── */}
       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
+        display: 'flex', alignItems: 'center', gap: 8,
         padding: '0.5rem 0.75rem',
         borderBottom: '1px solid #2a2a2a',
-        background: '#1a1a1a',
-        flexShrink: 0,
+        background: '#1a1a1a', flexShrink: 0,
       }}>
         {method && (
           <span style={{
@@ -107,37 +145,73 @@ const InlineResponsePanel: React.FC<ResponsePanelProps> = ({ nodeLabel, method, 
             {method}
           </span>
         )}
-        <span style={{
-          flex: 1, fontSize: '0.82rem', color: '#e0e0e0',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
+        <span style={{ flex: 1, fontSize: '0.82rem', color: '#e0e0e0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {nodeLabel}
         </span>
         {response && (
-          <span style={{
-            fontWeight: 700, fontSize: '0.82rem',
-            color: statusColor(response.status),
-            flexShrink: 0,
-          }}>
+          <span style={{ fontWeight: 700, fontSize: '0.82rem', color: statusColor(response.status), flexShrink: 0 }}>
             {response.status} {response.statusText}
           </span>
         )}
-        <button
-          onClick={onClose}
-          title="Close"
-          style={{
-            background: 'none', border: 'none', color: '#666',
-            cursor: 'pointer', fontSize: '1rem', padding: '0 2px', lineHeight: 1,
-            flexShrink: 0,
-          }}
-        >
-          ✕
-        </button>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '1rem', padding: '0 2px', lineHeight: 1, flexShrink: 0 }}>✕</button>
       </div>
 
-      {/* No response (pure network error) */}
+      {/* ── Request section ── */}
+      {request && (
+        <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0, borderBottom: '1px solid #2a2a2a' }}>
+          {sectionLabel('Request')}
+
+          {/* URL row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0.3rem 0.75rem', background: '#0a0a0a', flexShrink: 0 }}>
+            <span style={{
+              background: METHOD_COLORS[request.method] || '#6b7280',
+              color: '#000', fontSize: '0.58rem', fontWeight: 700,
+              padding: '1px 4px', borderRadius: 3, flexShrink: 0,
+            }}>
+              {request.method}
+            </span>
+            <span style={{
+              fontFamily: 'monospace', fontSize: '0.72rem', color: '#9ca3af',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+            }}>
+              {request.url}
+            </span>
+          </div>
+
+          {tabBar(
+            ['headers', 'body'], reqTab, setReqTab,
+            { headers: Object.keys(request.headers || {}).length },
+          )}
+
+          {/* Request tab content — capped height so it doesn't crowd the response */}
+          <div style={{ maxHeight: 130, overflowY: 'auto' }}>
+            {reqTab === 'headers' && (
+              Object.keys(request.headers || {}).length === 0
+                ? <div style={{ padding: '0.5rem 0.75rem', color: '#444', fontSize: '0.75rem', fontStyle: 'italic' }}>No headers</div>
+                : Object.entries(request.headers || {}).map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', padding: '0.25rem 0.75rem', borderBottom: '1px solid #111', gap: 8, fontSize: '0.74rem' }}>
+                    <span style={{ color: '#0d9e9e', flexShrink: 0, minWidth: 110, wordBreak: 'break-all' }}>{k}</span>
+                    <span style={{ color: '#9ca3af', wordBreak: 'break-all' }}>{v}</span>
+                  </div>
+                ))
+            )}
+            {reqTab === 'body' && (
+              !request.body || request.body.type === 'none'
+                ? <div style={{ padding: '0.5rem 0.75rem', color: '#444', fontSize: '0.75rem', fontStyle: 'italic' }}>No body</div>
+                : <pre style={{ margin: 0, padding: '0.5rem 0.75rem', fontFamily: 'monospace', fontSize: '0.72rem', color: '#9ca3af', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {request.body.type === 'raw' ? String(request.body.data || '') : `[${request.body.type}]`}
+                  </pre>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Response section ── */}
+      {request && (response || result.error) && sectionLabel('Response')}
+
+      {/* Network error — no HTTP response */}
       {!response && result.error && (
-        <div style={{ padding: '1rem', color: '#f87171', fontSize: '0.85rem' }}>
+        <div style={{ padding: '1rem', color: '#f87171', fontSize: '0.85rem', flex: 1 }}>
           <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Network Error</div>
           <div style={{ wordBreak: 'break-word', lineHeight: 1.5 }}>{result.error}</div>
         </div>
@@ -145,94 +219,39 @@ const InlineResponsePanel: React.FC<ResponsePanelProps> = ({ nodeLabel, method, 
 
       {response && (
         <>
-          {/* Stats bar */}
-          <div style={{
-            display: 'flex', gap: 16,
-            padding: '0.35rem 0.75rem',
-            borderBottom: '1px solid #222',
-            fontSize: '0.75rem', color: '#777', flexShrink: 0,
-          }}>
+          {/* Stats */}
+          <div style={{ display: 'flex', gap: 16, padding: '0.3rem 0.75rem', borderBottom: '1px solid #222', fontSize: '0.72rem', color: '#666', flexShrink: 0 }}>
             <span>{response.time} ms</span>
             <span>{(response.size / 1024).toFixed(1)} KB</span>
           </div>
 
-          {/* Tabs */}
-          <div style={{
-            display: 'flex', borderBottom: '1px solid #222',
-            flexShrink: 0, background: '#141414',
-          }}>
-            {(['body', 'headers'] as const).map(t => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                style={{
-                  background: 'none', border: 'none',
-                  borderBottom: tab === t ? '2px solid #0d7377' : '2px solid transparent',
-                  color: tab === t ? '#0d9e9e' : '#888',
-                  padding: '0.35rem 0.75rem',
-                  cursor: 'pointer', fontSize: '0.8rem', fontWeight: tab === t ? 600 : 400,
-                  textTransform: 'capitalize',
-                }}
-              >
-                {t}
-                {t === 'headers' && (
-                  <span style={{ marginLeft: 4, fontSize: '0.7rem', color: '#555' }}>
-                    ({Object.keys(response.headers).length})
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+          {tabBar(
+            ['headers', 'body'], resTab, setResTab,
+            { headers: Object.keys(response.headers).length },
+          )}
 
-          {/* Body */}
-          {tab === 'body' && (
+          {resTab === 'body' && (
             <div style={{ flex: 1, overflow: 'auto', padding: '0.75rem' }}>
               {response.data === null || response.data === undefined || response.data === '' ? (
-                <div style={{ color: '#555', fontSize: '0.82rem', fontStyle: 'italic' }}>
-                  Empty response body
-                </div>
+                <div style={{ color: '#555', fontSize: '0.82rem', fontStyle: 'italic' }}>Empty response body</div>
               ) : (
-                <pre style={{
-                  margin: 0,
-                  fontFamily: 'monospace',
-                  fontSize: '0.78rem',
-                  color: '#d4d4d4',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  lineHeight: 1.55,
-                }}>
+                <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: '0.78rem', color: '#d4d4d4', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.55 }}>
                   {formatBody(response.data)}
                 </pre>
               )}
             </div>
           )}
 
-          {/* Headers */}
-          {tab === 'headers' && (
+          {resTab === 'headers' && (
             <div style={{ flex: 1, overflow: 'auto' }}>
               {Object.entries(response.headers).map(([key, value]) => (
-                <div
-                  key={key}
-                  style={{
-                    display: 'flex',
-                    padding: '0.3rem 0.75rem',
-                    borderBottom: '1px solid #1a1a1a',
-                    gap: 8,
-                    fontSize: '0.78rem',
-                  }}
-                >
-                  <span style={{ color: '#0d9e9e', flexShrink: 0, minWidth: 140, wordBreak: 'break-all' }}>
-                    {key}
-                  </span>
-                  <span style={{ color: '#d4d4d4', wordBreak: 'break-all' }}>
-                    {value}
-                  </span>
+                <div key={key} style={{ display: 'flex', padding: '0.3rem 0.75rem', borderBottom: '1px solid #1a1a1a', gap: 8, fontSize: '0.78rem' }}>
+                  <span style={{ color: '#0d9e9e', flexShrink: 0, minWidth: 140, wordBreak: 'break-all' }}>{key}</span>
+                  <span style={{ color: '#d4d4d4', wordBreak: 'break-all' }}>{value}</span>
                 </div>
               ))}
               {Object.keys(response.headers).length === 0 && (
-                <div style={{ padding: '1rem', color: '#555', fontSize: '0.82rem', fontStyle: 'italic' }}>
-                  No headers
-                </div>
+                <div style={{ padding: '1rem', color: '#555', fontSize: '0.82rem', fontStyle: 'italic' }}>No headers</div>
               )}
             </div>
           )}
@@ -265,6 +284,14 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
   const [suggestIdx, setSuggestIdx] = useState<number | null>(null);
   const [saveToast, setSaveToast] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [runnerLogs, setRunnerLogs] = useState<RunnerLogEntry[]>([]);
+  const [showLog, setShowLog] = useState(false);
+  const logEndRef = useRef<HTMLDivElement | null>(null);
+  const [delayConfigNodeId, setDelayConfigNodeId] = useState<string | null>(null);
+  const [delayMsDraft, setDelayMsDraft] = useState('1000');
+  const [foreachConfigNodeId, setForeachConfigNodeId] = useState<string | null>(null);
+  const [foreachExprDraft, setForeachExprDraft] = useState('');
+  const [foreachItemVarDraft, setForeachItemVarDraft] = useState('item');
 
   const showToast = useCallback(() => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -305,7 +332,10 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         method: n.data.requestId ? findRequest(n.data.requestId)?.method : undefined,
         result: results[n.id],
         isSelected: n.id === selectedId,
-        variables: n.data.variables,   // start node overrides
+        variables: n.data.variables,
+        delayMs: n.data.delayMs,
+        foreachExpression: n.data.foreachExpression,
+        foreachItemVar: n.data.foreachItemVar,
       },
     })),
   [findRequest]);
@@ -322,7 +352,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
 
       let stroke = '#0d7377'; // default: teal
       if (hasRun) {
-        stroke = isFollowed ? '#22c55e' : '#333'; // green if followed, dim if not
+        stroke = isFollowed ? '#22c55e' : '#666'; // green if followed, muted if not
       } else if (isConditional) {
         stroke = '#f59e0b'; // amber for conditional edges pre-run
       }
@@ -338,9 +368,14 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         ? `${e.data.mappings.length} ↦`
         : null;
 
+      const edgeOutput = e.data?.output?.trim();
+      const outputLabel = edgeOutput
+        ? `▶ ${edgeOutput.slice(0, 24)}${edgeOutput.length > 24 ? '…' : ''}`
+        : null;
+
       const label = condLabel
         ? (mappingsLabel ? `if (${condLabel})  ${mappingsLabel}` : `if (${condLabel})`)
-        : mappingsLabel || undefined;
+        : outputLabel ?? mappingsLabel ?? undefined;
 
       return {
         id: e.id,
@@ -353,9 +388,9 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
           stroke,
           strokeWidth: isFollowed ? 2.5 : 2,
           strokeDasharray: isConditional && !isFollowed ? '6 4' : undefined,
-          opacity: isSkipped ? 0.35 : 1,
+          opacity: isSkipped ? 0.6 : 1,
         },
-        animated: isFollowed && !hasRun ? false : false,
+        reconnectable: true,
         label,
         labelStyle: { fill: isConditional ? '#f59e0b' : '#aaa', fontSize: 10 },
         labelBgStyle: { fill: '#111' },
@@ -371,6 +406,18 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     toFlowEdges(runner.edges),
   );
   const runnerRef = useRef(runner);
+  const rfInstanceRef = useRef<any>(null);
+
+  // Returns the centre of the currently visible canvas in flow coordinates
+  const getCanvasCenter = useCallback((): { x: number; y: number } => {
+    const inst = rfInstanceRef.current;
+    if (!inst) return { x: 250, y: 200 };
+    const { x: vpX, y: vpY, zoom } = inst.getViewport();
+    const container = document.querySelector<HTMLElement>('.react-flow');
+    const w = container?.clientWidth ?? 800;
+    const h = container?.clientHeight ?? 500;
+    return { x: (-vpX + w / 2) / zoom, y: (-vpY + h / 2) / zoom };
+  }, []);
 
   // Sync when the runner changes (different runner selected)
   useEffect(() => {
@@ -381,6 +428,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setNodeResults({});
     setSelectedNodeId(null);
     setFollowedEdgeIds(new Set());
+    setRunnerLogs([]);
   }, [runner.id]);
 
   // Re-style edges whenever followedEdgeIds changes (after a run)
@@ -390,6 +438,17 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setEdges(toFlowEdges(currentRunner.edges, followedEdgeIds, true));
   }, [followedEdgeIds]);
 
+  // Auto-scroll log panel to newest entry
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [runnerLogs]);
+
+  const handleDeleteNode = useCallback((nodeId: string, label: string) => {
+    if (!confirm(`Delete "${label}"? Any connected edges will also be removed.`)) return;
+    setNodes(prev => prev.filter(n => n.id !== nodeId));
+    setEdges(prev => prev.filter(e => e.source !== nodeId && e.target !== nodeId));
+  }, [setNodes, setEdges]);
+
   // Refresh node data whenever results or selection changes
   useEffect(() => {
     setNodes(prev => prev.map(n => ({
@@ -398,21 +457,33 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         ...n.data,
         result: nodeResults[n.id],
         isSelected: n.id === selectedNodeId,
+        onDelete: n.type === 'start' ? undefined
+          : () => handleDeleteNode(n.id, (n.data.label as string) || 'node'),
       },
     })));
-  }, [nodeResults, selectedNodeId]);
+  }, [nodeResults, selectedNodeId, handleDeleteNode]);
 
   // ── Node click: open inline panel ──────────────────────────────────────────
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    // Start node → open variable overrides dialog
     if (node.type === 'start') {
       const existing = (node.data.variables as { key: string; value: string }[] | undefined) ?? [];
       setStartVarDrafts(existing.length > 0 ? [...existing] : [{ key: '', value: '' }]);
       setStartVarsOpen(true);
       return;
     }
-    // Request node → open inline response panel
+    if (node.type === 'delay') {
+      setDelayMsDraft(String((node.data.delayMs as number | undefined) ?? 1000));
+      setDelayConfigNodeId(node.id);
+      return;
+    }
+    if (node.type === 'foreach') {
+      setForeachExprDraft((node.data.foreachExpression as string | undefined) ?? '');
+      setForeachItemVarDraft((node.data.foreachItemVar as string | undefined) ?? 'item');
+      setForeachConfigNodeId(node.id);
+      return;
+    }
+    // Request node → inline response panel
     const result = nodeResults[node.id];
     const hasViewable = result && (result.status === 'success' || result.status === 'error');
     if (!hasViewable) return;
@@ -435,6 +506,31 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setStartVarsOpen(false);
   }, [startVarDrafts, setNodes]);
 
+  const handleSaveDelayConfig = useCallback(() => {
+    const ms = Math.max(0, parseInt(delayMsDraft, 10) || 0);
+    setNodes(prev => prev.map(n =>
+      n.id !== delayConfigNodeId ? n : { ...n, data: { ...n.data, delayMs: ms, label: `${ms}ms` } },
+    ));
+    setDelayConfigNodeId(null);
+  }, [delayConfigNodeId, delayMsDraft, setNodes]);
+
+  const handleSaveForeachConfig = useCallback(() => {
+    const expr = foreachExprDraft.trim();
+    const itemVar = foreachItemVarDraft.trim() || 'item';
+    setNodes(prev => prev.map(n =>
+      n.id !== foreachConfigNodeId ? n : {
+        ...n,
+        data: {
+          ...n.data,
+          foreachExpression: expr,
+          foreachItemVar: itemVar,
+          label: `↻ ${expr || 'array'}`,
+        },
+      },
+    ));
+    setForeachConfigNodeId(null);
+  }, [foreachConfigNodeId, foreachExprDraft, foreachItemVarDraft, setNodes]);
+
   // ── Build Runner from current flow state ───────────────────────────────────
 
   const buildRunnerFromFlow = useCallback((): Runner => {
@@ -448,6 +544,15 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         ...(n.type === 'start' && (n.data.variables as any)?.length
           ? { variables: n.data.variables as { key: string; value: string }[] }
           : {}),
+        ...(n.type === 'delay' && n.data.delayMs != null
+          ? { delayMs: n.data.delayMs as number }
+          : {}),
+        ...(n.type === 'foreach'
+          ? {
+              foreachExpression: (n.data.foreachExpression as string | undefined) ?? '',
+              foreachItemVar: (n.data.foreachItemVar as string | undefined) ?? 'item',
+            }
+          : {}),
       },
     }));
 
@@ -456,6 +561,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
       const edgeData: RunnerEdge['data'] = {};
       if (d?.mappings?.length) edgeData.mappings = d.mappings;
       if (d?.condition?.trim()) edgeData.condition = d.condition.trim();
+      if (d?.output?.trim()) edgeData.output = d.output.trim();
       return {
         id: e.id,
         source: e.source,
@@ -482,13 +588,30 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     showToast();
   }, [buildRunnerFromFlow, onSave, showToast]);
 
+  const handleCancel = useCallback(() => {
+    if (!confirm('Discard unsaved changes and revert to the last saved version?')) return;
+    runnerRef.current = runner;
+    setRunnerName(runner.name);
+    setNodes(toFlowNodes(runner.nodes, {}, null));
+    setEdges(toFlowEdges(runner.edges, new Set(), false));
+    setNodeResults({});
+    setSelectedNodeId(null);
+    setFollowedEdgeIds(new Set());
+    setRunnerLogs([]);
+  }, [runner, toFlowNodes, toFlowEdges]);
+
   const handleConnect = useCallback((params: Connection) => {
     setEdges(prev => addEdge({
       ...params,
       id: `edge-${Date.now()}`,
       markerEnd: { type: MarkerType.ArrowClosed, color: '#0d7377' },
       style: { stroke: '#0d7377', strokeWidth: 2 },
+      reconnectable: true,
     }, prev));
+  }, [setEdges]);
+
+  const handleReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
+    setEdges(prev => reconnectEdge(oldEdge, newConnection, prev));
   }, [setEdges]);
 
   const handleEdgeClick = useCallback((_: any, edge: Edge) => {
@@ -497,31 +620,41 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
       edgeId: edge.id,
       condition: data?.condition || '',
       mappings: data?.mappings ? [...data.mappings] : [],
-      activeTab: data?.condition?.trim() ? 'condition' : 'mappings',
+      output: data?.output || '',
+      activeTab: data?.output?.trim() ? 'output' : data?.condition?.trim() ? 'condition' : 'mappings',
     });
   }, []);
 
   const handleAddRequest = useCallback((request: ApiRequest) => {
-    const newNodeId = `node-${Date.now()}`;
-    const maxY = Math.max(...nodes.map(n => n.position.y), 0);
-    const xPos = nodes.find(n => (n as any).type === 'end')?.position.x ?? 250;
-
+    const { x, y } = getCanvasCenter();
     const newNode: Node = {
-      id: newNodeId,
-      type: 'request',
-      position: { x: xPos, y: maxY + 120 },
+      id: `node-${Date.now()}`, type: 'request',
+      position: { x: x - 90, y: y - 25 },
       data: { label: request.name, requestId: request.id, method: request.method },
     };
-
-    setNodes(prev =>
-      prev.map(n =>
-        (n as any).type === 'end'
-          ? { ...n, position: { ...n.position, y: maxY + 240 } }
-          : n,
-      ).concat(newNode),
-    );
+    setNodes(prev => prev.concat(newNode));
     setShowAddRequest(false);
-  }, [nodes, setNodes]);
+  }, [getCanvasCenter, setNodes]);
+
+  const handleAddDelay = useCallback(() => {
+    const { x, y } = getCanvasCenter();
+    const newNode: Node = {
+      id: `delay-${Date.now()}`, type: 'delay',
+      position: { x: x - 50, y: y - 35 },
+      data: { label: '1000ms', delayMs: 1000 },
+    };
+    setNodes(prev => prev.concat(newNode));
+  }, [getCanvasCenter, setNodes]);
+
+  const handleAddForeach = useCallback(() => {
+    const { x, y } = getCanvasCenter();
+    const newNode: Node = {
+      id: `foreach-${Date.now()}`, type: 'foreach',
+      position: { x: x - 90, y: y - 40 },
+      data: { label: '↻ array', foreachExpression: '', foreachItemVar: 'item' },
+    };
+    setNodes(prev => prev.concat(newNode));
+  }, [getCanvasCenter, setNodes]);
 
   const handleRun = useCallback(async () => {
     if (isRunning) return;
@@ -529,6 +662,8 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setNodeResults({});
     setSelectedNodeId(null);
     setFollowedEdgeIds(new Set());
+    setRunnerLogs([]);
+    setShowLog(true);
     // Reset edges to pre-run styling
     setEdges(toFlowEdges(runnerRef.current.edges, new Set(), false));
 
@@ -546,6 +681,9 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         },
         (edgeId) => {
           setFollowedEdgeIds(prev => new Set([...prev, edgeId]));
+        },
+        (entry) => {
+          setRunnerLogs(prev => [...prev, entry]);
         },
       );
     } finally {
@@ -584,6 +722,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
   const handleDeleteEdge = useCallback(() => {
     if (!mappingDialog) return;
     const hasData = mappingDialog.condition.trim() ||
+      mappingDialog.output.trim() ||
       mappingDialog.mappings.some(m => m.fromExpression.trim() || m.toVariable.trim());
     if (hasData && !confirm('This edge has a condition or mappings configured. Delete it anyway?')) return;
 
@@ -598,9 +737,11 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
       m => m.fromExpression.trim() && m.toVariable.trim(),
     );
     const condition = mappingDialog.condition.trim();
+    const output = mappingDialog.output.trim();
     const newData = {
       ...(mappings.length ? { mappings } : {}),
       ...(condition ? { condition } : {}),
+      ...(output ? { output } : {}),
     };
     const hasData = Object.keys(newData).length > 0;
 
@@ -616,7 +757,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
       const hasRun = followedEdgeIds.size > 0;
 
       let stroke = '#0d7377';
-      if (hasRun) stroke = isFollowed ? '#22c55e' : '#333';
+      if (hasRun) stroke = isFollowed ? '#22c55e' : '#666';
       else if (isConditional) stroke = '#f59e0b';
 
       const condLabel = condition
@@ -624,9 +765,10 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
           + (condition.replace(/^return\s+/, '').length > 36 ? '…' : '')
         : null;
       const mappingsLabel = mappings.length ? `${mappings.length} ↦` : null;
+      const outputLabel = output ? `▶ ${output.slice(0, 24)}${output.length > 24 ? '…' : ''}` : null;
       const label = condLabel
         ? (mappingsLabel ? `if (${condLabel})  ${mappingsLabel}` : `if (${condLabel})`)
-        : mappingsLabel || undefined;
+        : outputLabel ?? mappingsLabel ?? undefined;
 
       return {
         ...e,
@@ -639,7 +781,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
           stroke,
           strokeWidth: isFollowed ? 2.5 : 2,
           strokeDasharray: isConditional && !isFollowed ? '6 4' : undefined,
-          opacity: hasRun && isConditional && !isFollowed ? 0.35 : 1,
+          opacity: hasRun && isConditional && !isFollowed ? 0.6 : 1,
         },
       };
     }));
@@ -762,17 +904,42 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
           )}
         </div>
 
+        <button className="button button-secondary" onClick={handleAddDelay} title="Add a delay node">⏱ Delay</button>
+        <button className="button button-secondary" onClick={handleAddForeach} title="Add a For Each node">↻ For Each</button>
+
         <button className="button button-secondary" onClick={handleSave}>Save</button>
+        <button className="button button-secondary" onClick={handleCancel} title="Discard unsaved changes and revert to last saved version" style={{ color: '#f87171', borderColor: '#f87171' }}>Revert</button>
         <button className="button button-secondary" onClick={handleExport} title="Export runner as JSON">Export</button>
         <button className="button button-secondary" onClick={handleImport} title="Import runner from JSON">Import</button>
 
+        <button
+          className={`button ${showLog ? '' : 'button-secondary'}`}
+          onClick={() => setShowLog(v => !v)}
+          title="Toggle execution log"
+          style={{ position: 'relative' }}
+        >
+          Log
+          {runnerLogs.length > 0 && (
+            <span style={{
+              position: 'absolute', top: -4, right: -4,
+              background: '#0d7377', color: '#fff',
+              borderRadius: '50%', width: 16, height: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.55rem', fontWeight: 700,
+            }}>
+              {runnerLogs.length > 99 ? '99+' : runnerLogs.length}
+            </span>
+          )}
+        </button>
+
         <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: '#444' }}>
-          Click edge → mappings · Click completed node → response
+          Click edge → settings · Click node → configure / view response
         </span>
       </div>
 
-      {/* Canvas + optional response panel */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      {/* Canvas + optional response panel + log panel */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
 
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
           <ReactFlow
@@ -780,7 +947,9 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onInit={inst => { rfInstanceRef.current = inst; }}
             onConnect={handleConnect}
+            onReconnect={handleReconnect}
             onEdgeClick={handleEdgeClick}
             onNodeClick={handleNodeClick}
             nodeTypes={nodeTypes}
@@ -824,7 +993,67 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
             onClose={() => setSelectedNodeId(null)}
           />
         )}
-      </div>
+      </div>{/* end canvas + response panel row */}
+
+      {/* Execution log panel */}
+      {showLog && (
+        <div style={{
+          height: 200, flexShrink: 0, borderTop: '1px solid #2a2a2a',
+          background: '#0a0a0a', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '0.3rem 0.75rem', borderBottom: '1px solid #1a1a1a',
+            background: '#111', flexShrink: 0,
+          }}>
+            <span style={{ fontSize: '0.72rem', color: '#555', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Execution Log
+            </span>
+            <span style={{ fontSize: '0.7rem', color: '#333' }}>{runnerLogs.length} entries</span>
+            <button
+              onClick={() => setRunnerLogs([])}
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#444', cursor: 'pointer', fontSize: '0.72rem' }}
+            >
+              Clear
+            </button>
+            <button
+              onClick={() => setShowLog(false)}
+              style={{ background: 'none', border: 'none', color: '#444', cursor: 'pointer', fontSize: '0.9rem', lineHeight: 1 }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0.25rem 0' }}>
+            {runnerLogs.length === 0 ? (
+              <div style={{ padding: '0.75rem', color: '#333', fontSize: '0.78rem', fontStyle: 'italic' }}>
+                Run the flow to see execution logs here.
+              </div>
+            ) : runnerLogs.map((entry, i) => {
+              const colors: Record<RunnerLogEntry['level'], string> = {
+                info:    '#888',
+                success: '#4ade80',
+                warn:    '#f59e0b',
+                error:   '#f87171',
+                script:  '#0d9e9e',
+              };
+              return (
+                <div key={i} style={{
+                  padding: '0.15rem 0.75rem',
+                  fontSize: '0.75rem',
+                  fontFamily: 'monospace',
+                  color: colors[entry.level],
+                  lineHeight: 1.5,
+                  borderBottom: '1px solid #111',
+                }}>
+                  {entry.message}
+                </div>
+              );
+            })}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+      )}
+      </div>{/* end column wrapper */}
 
       {/* Start node: variable overrides dialog */}
       {startVarsOpen && (
@@ -984,7 +1213,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
 
             {/* Tabs */}
             <div style={{ display: 'flex', borderBottom: '1px solid #333', background: '#141414' }}>
-              {(['condition', 'mappings'] as const).map(tab => (
+              {(['condition', 'mappings', 'output'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setMappingDialog(prev => prev ? { ...prev, activeTab: tab } : null)}
@@ -998,12 +1227,15 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
                     textTransform: 'capitalize',
                   }}
                 >
-                  {tab === 'condition' ? 'Condition (if)' : 'Data Mappings'}
+                  {tab === 'condition' ? 'Condition (if)' : tab === 'mappings' ? 'Data Mappings' : 'Output'}
                   {tab === 'condition' && mappingDialog.condition.trim() && (
                     <span style={{ marginLeft: 5, background: '#f59e0b', color: '#000', fontSize: '0.6rem', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>ON</span>
                   )}
                   {tab === 'mappings' && mappingDialog.mappings.length > 0 && (
                     <span style={{ marginLeft: 5, background: '#0d7377', color: '#fff', fontSize: '0.6rem', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>{mappingDialog.mappings.length}</span>
+                  )}
+                  {tab === 'output' && mappingDialog.output.trim() && (
+                    <span style={{ marginLeft: 5, background: '#22c55e', color: '#000', fontSize: '0.6rem', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>ON</span>
                   )}
                 </button>
               ))}
@@ -1119,6 +1351,39 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* ── Output tab ── */}
+              {mappingDialog.activeTab === 'output' && (
+                <div>
+                  <p style={{ color: '#888', fontSize: '0.8rem', margin: '0 0 0.75rem', lineHeight: 1.6 }}>
+                    When this edge is followed, the value of this expression is printed to the execution log.
+                    Useful on edges leading to the End node. Leave blank for no output.
+                  </p>
+                  <input
+                    autoFocus
+                    placeholder="e.g.  body.description  or  {{access_token}}  or  status"
+                    value={mappingDialog.output}
+                    onChange={e => setMappingDialog(prev => prev ? { ...prev, output: e.target.value } : null)}
+                    className="form-input"
+                    style={{ width: '100%', fontSize: '0.82rem', fontFamily: 'monospace', boxSizing: 'border-box', marginBottom: '0.75rem' }}
+                  />
+                  <div style={{ background: '#111', borderRadius: 4, padding: '0.5rem 0.75rem', fontSize: '0.73rem', color: '#555', lineHeight: 1.7 }}>
+                    <code style={{ color: '#0d9e9e' }}>body.description</code> — field from the response body<br />
+                    <code style={{ color: '#0d9e9e' }}>body.advanceBalance.availableAdvance</code> — nested path<br />
+                    <code style={{ color: '#0d9e9e' }}>{'{{access_token}}'}</code> — environment / mapped variable<br />
+                    <code style={{ color: '#0d9e9e' }}>status</code> — HTTP status code of the source node
+                  </div>
+                  {mappingDialog.output.trim() && (
+                    <button
+                      className="button-secondary button"
+                      onClick={() => setMappingDialog(prev => prev ? { ...prev, output: '' } : null)}
+                      style={{ marginTop: '0.5rem', fontSize: '0.78rem', color: '#f87171', borderColor: '#f87171' }}
+                    >
+                      Clear output
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '0.75rem 1rem', borderTop: '1px solid #333' }}>
@@ -1131,6 +1396,80 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
               </button>
               <button className="button button-secondary" onClick={() => setMappingDialog(null)}>Cancel</button>
               <button className="button" onClick={handleSaveEdgeDialog}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delay config dialog */}
+      {delayConfigNodeId && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
+          <div style={{ background: '#1a1a1a', border: '1px solid #444', borderRadius: 8, padding: '1.5rem', width: 300 }}>
+            <h3 style={{ margin: '0 0 1rem', color: '#fff', fontSize: '0.9rem' }}>⏱ Delay Duration</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
+              <input
+                type="number"
+                min={0}
+                value={delayMsDraft}
+                onChange={e => setDelayMsDraft(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSaveDelayConfig()}
+                autoFocus
+                className="form-input"
+                style={{ flex: 1, fontSize: '0.9rem' }}
+              />
+              <span style={{ color: '#888', fontSize: '0.85rem' }}>ms</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="button button-secondary" onClick={() => setDelayConfigNodeId(null)}>Cancel</button>
+              <button className="button" onClick={handleSaveDelayConfig}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ForEach config dialog */}
+      {foreachConfigNodeId && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
+          <div style={{ background: '#1a1a1a', border: '1px solid #444', borderRadius: 8, padding: '1.5rem', width: 480 }}>
+            <h3 style={{ margin: '0 0 0.5rem', color: '#fff', fontSize: '0.9rem' }}>↻ Configure For Each</h3>
+            <p style={{ color: '#888', fontSize: '0.78rem', margin: '0 0 1rem', lineHeight: 1.6 }}>
+              Connect the <strong style={{ color: '#818cf8' }}>body</strong> handle (bottom-left) to the request(s) to run per item.
+              Connect the <strong style={{ color: '#22c55e' }}>done</strong> handle (bottom-right) to continue after all items complete.
+            </p>
+
+            <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+              <label style={{ color: '#aaa', fontSize: '0.78rem', display: 'block', marginBottom: 4 }}>Array source</label>
+              <input
+                placeholder="e.g. body.advanceBalance.advances  or  advances"
+                value={foreachExprDraft}
+                onChange={e => setForeachExprDraft(e.target.value)}
+                autoFocus
+                className="form-input"
+                style={{ width: '100%', fontSize: '0.82rem', fontFamily: 'monospace', boxSizing: 'border-box' }}
+              />
+              <div style={{ fontSize: '0.72rem', color: '#555', marginTop: 4 }}>
+                Use a <code style={{ color: '#0d9e9e' }}>body.x.y</code> path from the last response, or a variable name mapped from a previous edge.
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '1rem' }}>
+              <label style={{ color: '#aaa', fontSize: '0.78rem', display: 'block', marginBottom: 4 }}>Item variable prefix</label>
+              <input
+                placeholder="item"
+                value={foreachItemVarDraft}
+                onChange={e => setForeachItemVarDraft(e.target.value)}
+                className="form-input"
+                style={{ fontSize: '0.82rem', fontFamily: 'monospace', width: 140 }}
+              />
+              <div style={{ fontSize: '0.72rem', color: '#555', marginTop: 4 }}>
+                Fields injected as <code style={{ color: '#0d9e9e' }}>{`{{${foreachItemVarDraft || 'item'}_fieldName}}`}</code>.
+                Full item JSON as <code style={{ color: '#0d9e9e' }}>{`{{${foreachItemVarDraft || 'item'}}}`}</code>.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="button button-secondary" onClick={() => setForeachConfigNodeId(null)}>Cancel</button>
+              <button className="button" onClick={handleSaveForeachConfig}>Save</button>
             </div>
           </div>
         </div>

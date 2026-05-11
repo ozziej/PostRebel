@@ -1,7 +1,27 @@
-import { Runner, RunnerEdge, RunnerNodeResult, Collection, Environment, Certificate, ApiResponse } from '../types';
+import {
+  Runner, RunnerEdge, RunnerNodeResult, RunnerLogEntry,
+  Collection, Environment, Certificate, ApiRequest, ApiResponse,
+} from '../types';
 import { HttpService } from './httpService';
 
-// ── Value extraction (dot-notation paths into a response) ─────────────────────
+// ── Path walking (shared by extractValue + extractArray) ──────────────────────
+
+function walkPath(data: any, segments: string[]): any {
+  let current = data;
+  for (const segment of segments) {
+    if (current == null) return undefined;
+    // Handle bracket indices: "advances[0]" → ["advances", "0"]
+    const tokens = segment.split(/\[(\d+)\]/).filter(t => t !== '');
+    for (const token of tokens) {
+      if (current == null) return undefined;
+      const idx = Number(token);
+      current = Number.isNaN(idx) ? current[token] : current[idx];
+    }
+  }
+  return current;
+}
+
+// ── Value extraction ──────────────────────────────────────────────────────────
 
 function extractValue(response: ApiResponse, expression: string): string {
   const parts = expression.split('.');
@@ -17,24 +37,10 @@ function extractValue(response: ApiResponse, expression: string): string {
   }
 
   if (root === 'body') {
-    // Split on dots, but each segment may contain one or more array indices, e.g.
-    //   "advanceBalance.advances[0].advancesUuid"
-    //   "items[0][2].name"
-    // Strategy: split the full path (after "body.") on "." then for each segment
-    // further split on "[N]" brackets so every token is either a key or a numeric index.
-    const path = parts.slice(1);
-    let current: any = response.data;
-    for (const segment of path) {
-      if (current == null) return '';
-      // Expand "key[0][1]..." into ["key", "0", "1", ...]
-      const tokens = segment.split(/\[(\d+)\]/).filter(t => t !== '');
-      for (const token of tokens) {
-        if (current == null) return '';
-        const idx = Number(token);
-        current = Number.isNaN(idx) ? current[token] : current[idx];
-      }
-    }
-    return current != null ? String(current) : '';
+    const value = walkPath(response.data, parts.slice(1));
+    if (value == null) return '';
+    if (Array.isArray(value) || (typeof value === 'object')) return JSON.stringify(value);
+    return String(value);
   }
 
   return '';
@@ -60,39 +66,34 @@ function applyMappings(
 
 // ── Condition evaluation ──────────────────────────────────────────────────────
 //
-// The condition script has access to:
-//   response  – { status, statusText, headers, body }
-//   body      – shorthand for response.body (parsed JSON object or string)
-//   status    – shorthand for response.status (number)
-//   headers   – shorthand for response.headers
-//   variables – current environment variables as a plain object
-//
-// The script must explicitly return true/false, e.g.:
-//   return status === 200;
-//   return body.success === true;
-//   return body.items && body.items.length > 0;
+// Available in scripts: response, body, status, headers, variables, console
+// Script must explicitly return true/false.
 
 export function evaluateCondition(
   script: string,
   response: ApiResponse,
   variables: Record<string, string>,
+  onLog?: (entry: RunnerLogEntry) => void,
 ): { passed: boolean; error?: string } {
   try {
     const body = response.data;
     const status = response.status;
     const headers = response.headers;
 
+    const mockConsole = {
+      log: (...args: any[]) => onLog?.({ level: 'script', message: args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') }),
+      warn: (...args: any[]) => onLog?.({ level: 'script', message: 'warn: ' + args.map(String).join(' ') }),
+      error: (...args: any[]) => onLog?.({ level: 'script', message: 'error: ' + args.map(String).join(' ') }),
+    };
+
     const fn = new Function(
-      'response', 'body', 'status', 'headers', 'variables',
+      'response', 'body', 'status', 'headers', 'variables', 'console',
       '"use strict";\n' + script,
     );
 
     const result = fn(
       { status, statusText: response.statusText, headers, body, data: response.data },
-      body,
-      status,
-      headers,
-      { ...variables },
+      body, status, headers, { ...variables }, mockConsole,
     );
 
     return { passed: Boolean(result) };
@@ -101,7 +102,277 @@ export function evaluateCondition(
   }
 }
 
-// ── Main executor ─────────────────────────────────────────────────────────────
+// ── Request resolver (substitutes {{vars}} for display purposes only) ─────────
+
+function resolveRequest(request: ApiRequest, vars: Record<string, string>): ApiRequest {
+  const sub = (text: string): string =>
+    text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
+
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(request.headers)) {
+    headers[sub(k)] = sub(v);
+  }
+
+  let body = request.body;
+  if (body?.type === 'raw' && typeof body.data === 'string') {
+    body = { ...body, data: sub(body.data) };
+  }
+
+  let auth = request.auth;
+  if (auth) {
+    if (auth.type === 'bearer' && auth.bearer)
+      auth = { ...auth, bearer: sub(auth.bearer) };
+    else if (auth.type === 'basic' && auth.basic)
+      auth = { ...auth, basic: { username: sub(auth.basic.username), password: sub(auth.basic.password) } };
+    else if (auth.type === 'jwt' && auth.jwt)
+      auth = { ...auth, jwt: sub(auth.jwt) };
+  }
+
+  return { ...request, url: sub(request.url), headers, body, auth };
+}
+
+// ── ForEach helpers ───────────────────────────────────────────────────────────
+
+function extractArray(
+  expression: string,
+  lastResponse: ApiResponse | null,
+  localVars: Record<string, string>,
+): any[] {
+  const trimmed = expression.trim();
+
+  // dot-notation path into the response body
+  if (trimmed.startsWith('body.') && lastResponse) {
+    const value = walkPath(lastResponse.data, trimmed.slice(5).split('.'));
+    return Array.isArray(value) ? value : [];
+  }
+
+  // variable reference (bare name or {{name}})
+  const varName = trimmed.replace(/^\{\{/, '').replace(/\}\}$/, '');
+  try {
+    const raw = localVars[varName];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function injectItemVars(
+  item: any,
+  itemVar: string,
+  localVars: Record<string, string>,
+): Record<string, string> {
+  const updated = { ...localVars };
+  // {{itemVar}} = full JSON
+  updated[itemVar] = typeof item === 'object' && item !== null ? JSON.stringify(item) : String(item);
+  // {{itemVar_fieldName}} = flattened first-level fields
+  if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
+    for (const [key, val] of Object.entries(item)) {
+      updated[`${itemVar}_${key}`] = val != null ? String(val) : '';
+    }
+  }
+  return updated;
+}
+
+// ── Sequence execution context ────────────────────────────────────────────────
+
+interface SeqCtx {
+  runner: Runner;
+  collection: Collection;
+  environment: Environment | null;
+  certificates: Certificate[];
+  outgoingEdges: Record<string, RunnerEdge[]>;
+  onNodeStatusChange: (nodeId: string, result: RunnerNodeResult) => void;
+  onEdgeFollowed?: (edgeId: string) => void;
+  onLog?: (entry: RunnerLogEntry) => void;
+}
+
+// ── Core sequence runner (called recursively for forEach bodies) ──────────────
+
+async function runSequence(
+  startNodeId: string,
+  localVars: Record<string, string>,
+  lastResponse: ApiResponse | null,
+  ctx: SeqCtx,
+): Promise<{ localVars: Record<string, string>; lastResponse: ApiResponse | null }> {
+  let vars = { ...localVars };
+  let resp = lastResponse;
+  let currentNodeId: string | undefined = startNodeId;
+
+  while (currentNodeId) {
+    const node = ctx.runner.nodes.find(n => n.id === currentNodeId);
+    if (!node) break;
+
+    // ── End ──────────────────────────────────────────────────────────────────
+    if (node.type === 'end') {
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
+      await pause(100);
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'success' });
+      ctx.onLog?.({ level: 'success', message: 'Runner completed' });
+      break;
+    }
+
+    // ── Delay ────────────────────────────────────────────────────────────────
+    if (node.type === 'delay') {
+      const ms = (node.data.delayMs as number | undefined) ?? 1000;
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
+      ctx.onLog?.({ level: 'info', message: `⏱ Waiting ${ms}ms…` });
+      await pause(ms);
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'success' });
+      const nextEdge = ctx.outgoingEdges[node.id]?.[0];
+      if (!nextEdge) break;
+      ctx.onEdgeFollowed?.(nextEdge.id);
+      currentNodeId = nextEdge.target;
+      continue;
+    }
+
+    // ── ForEach ──────────────────────────────────────────────────────────────
+    if (node.type === 'foreach') {
+      const expression = (node.data.foreachExpression as string | undefined) || '';
+      const itemVar = (node.data.foreachItemVar as string | undefined) || 'item';
+      const array = extractArray(expression, resp, vars);
+
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
+      ctx.onLog?.({ level: 'info', message: `↻ For Each: ${array.length} item${array.length !== 1 ? 's' : ''} from "${expression}"` });
+
+      const allEdges = ctx.outgoingEdges[node.id] || [];
+      const bodyEdge = allEdges.find(e => e.sourceHandle === 'body');
+      const doneEdge = allEdges.find(e => e.sourceHandle === 'done');
+
+      for (let i = 0; i < array.length; i++) {
+        ctx.onLog?.({ level: 'info', message: `↻ Item ${i + 1} / ${array.length}` });
+        const itemVars = injectItemVars(array[i], itemVar, vars);
+        if (bodyEdge) {
+          ctx.onEdgeFollowed?.(bodyEdge.id);
+          await runSequence(bodyEdge.target, itemVars, resp, ctx);
+        }
+      }
+
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'success' });
+      ctx.onLog?.({ level: 'success', message: `↻ For Each: all ${array.length} items done` });
+
+      if (!doneEdge) break;
+      if (doneEdge.data?.mappings?.length && resp) {
+        vars = applyMappings(resp, doneEdge.data.mappings, vars);
+      }
+      ctx.onEdgeFollowed?.(doneEdge.id);
+      currentNodeId = doneEdge.target;
+      continue;
+    }
+
+    // ── Request ──────────────────────────────────────────────────────────────
+    if (node.type === 'request') {
+      let request = ctx.collection.requests.find(r => r.id === node.data.requestId);
+      if (!request) {
+        for (const folder of ctx.collection.folders || []) {
+          const found = folder.requests.find(r => r.id === node.data.requestId);
+          if (found) { request = found; break; }
+        }
+      }
+
+      if (!request) {
+        ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'error', error: 'Request not found in collection' });
+        ctx.onLog?.({ level: 'error', message: `✗ ${node.data.label}: request not found in collection` });
+        break;
+      }
+
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
+      ctx.onLog?.({ level: 'info', message: `→ Executing: ${request.name}` });
+
+      let response: ApiResponse;
+      try {
+        const mergedEnv: Environment = ctx.environment
+          ? { ...ctx.environment, variables: vars }
+          : { id: 'runner-env', name: 'Runner', variables: vars };
+
+        response = await HttpService.executeRequest(request, mergedEnv, ctx.certificates, ctx.collection);
+        resp = response;
+
+        const ok = response.status >= 200 && response.status < 400;
+        ctx.onNodeStatusChange(node.id, {
+          nodeId: node.id,
+          status: response.status >= 400 || response.status === 0 ? 'error' : 'success',
+          response,
+          request: resolveRequest(request, vars),
+        });
+        ctx.onLog?.({
+          level: ok ? 'success' : 'warn',
+          message: `${ok ? '✓' : '!'} ${request.name} → ${response.status} ${response.statusText}`,
+        });
+      } catch (err: any) {
+        ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'error', error: err.message || String(err), request: resolveRequest(request, vars) });
+        ctx.onLog?.({ level: 'error', message: `✗ ${request.name}: ${err.message || String(err)}` });
+        break;
+      }
+
+      // Pick outgoing edge (conditional edges first, unconditional as fallback)
+      const edges = ctx.outgoingEdges[node.id] || [];
+      let followedEdge: RunnerEdge | null = null;
+
+      for (const edge of edges) {
+        const condScript = edge.data?.condition?.trim();
+        if (!condScript) {
+          followedEdge = edge;
+          break;
+        }
+        const abbrev = condScript.replace(/^return\s+/, '').replace(/;$/, '').slice(0, 50);
+        const { passed, error } = evaluateCondition(condScript, response, vars, ctx.onLog);
+        if (error) {
+          ctx.onLog?.({ level: 'error', message: `Condition error: ${error}` });
+        } else {
+          ctx.onLog?.({
+            level: passed ? 'success' : 'info',
+            message: `${passed ? '✓' : '✗'} if (${abbrev}) → ${passed ? 'followed' : 'skipped'}`,
+          });
+        }
+        if (passed) { followedEdge = edge; break; }
+      }
+
+      if (!followedEdge) break;
+
+      // Apply mappings and log them
+      if (followedEdge.data?.mappings?.length) {
+        const newVars = applyMappings(response, followedEdge.data.mappings, vars);
+        for (const m of followedEdge.data.mappings) {
+          const varName = m.toVariable.trim().replace(/^\{\{/, '').replace(/\}\}$/, '');
+          const val = newVars[varName];
+          if (varName && val !== undefined && val !== '') {
+            const display = val.length > 60 ? val.slice(0, 60) + '…' : val;
+            ctx.onLog?.({ level: 'info', message: `↦ ${m.fromExpression} → {{${varName}}} = "${display}"` });
+          }
+        }
+        vars = newVars;
+      }
+
+      // Log edge output expression if set
+      const outputExpr = followedEdge.data?.output?.trim();
+      if (outputExpr) {
+        let value = '';
+        if (outputExpr.startsWith('{{') && outputExpr.endsWith('}}')) {
+          value = vars[outputExpr.slice(2, -2).trim()] ?? '';
+        } else {
+          value = extractValue(response, outputExpr);
+        }
+        ctx.onLog?.({
+          level: value ? 'success' : 'warn',
+          message: value
+            ? `▶ ${outputExpr}: ${value}`
+            : `▶ ${outputExpr}: (empty or not found)`,
+        });
+      }
+
+      ctx.onEdgeFollowed?.(followedEdge.id);
+      currentNodeId = followedEdge.target;
+    } else {
+      break; // unknown node type
+    }
+  }
+
+  return { localVars: vars, lastResponse: resp };
+}
+
+// ── Main exported executor ────────────────────────────────────────────────────
 
 export async function executeRunner(
   runner: Runner,
@@ -110,10 +381,9 @@ export async function executeRunner(
   certificates: Certificate[],
   onNodeStatusChange: (nodeId: string, result: RunnerNodeResult) => void,
   onEdgeFollowed?: (edgeId: string) => void,
+  onLog?: (entry: RunnerLogEntry) => void,
 ): Promise<void> {
-  // Build: sourceNodeId → outgoing edges
-  // Conditional edges are sorted before unconditional ones so the unconditional
-  // edge acts as the "else" fallback when no condition matches.
+  // Build outgoing edge map; conditional edges sorted first (unconditional = else fallback)
   const outgoingEdges: Record<string, RunnerEdge[]> = {};
   for (const edge of runner.edges) {
     if (!outgoingEdges[edge.source]) outgoingEdges[edge.source] = [];
@@ -123,7 +393,7 @@ export async function executeRunner(
     outgoingEdges[nodeId].sort((a, b) => {
       const ac = !!(a.data?.condition?.trim());
       const bc = !!(b.data?.condition?.trim());
-      if (ac && !bc) return -1; // conditional edges first
+      if (ac && !bc) return -1;
       if (!ac && bc) return 1;
       return 0;
     });
@@ -132,110 +402,28 @@ export async function executeRunner(
   const startNode = runner.nodes.find(n => n.type === 'start');
   if (!startNode) return;
 
-  let localVars: Record<string, string> = environment
-    ? { ...environment.variables }
-    : {};
-
-  // Apply start-node variable overrides (runner-scoped, don't modify the real environment)
-  for (const { key, value } of startNode.data.variables ?? []) {
+  let localVars: Record<string, string> = environment ? { ...environment.variables } : {};
+  for (const { key, value } of (startNode.data.variables ?? [])) {
     if (key.trim()) localVars[key.trim()] = value;
   }
 
-  // Start node
   onNodeStatusChange(startNode.id, { nodeId: startNode.id, status: 'running' });
-  await delay(100);
+  await pause(100);
   onNodeStatusChange(startNode.id, { nodeId: startNode.id, status: 'success' });
+  onLog?.({ level: 'info', message: '▶ Runner started' });
 
-  // Start always takes its single outgoing edge unconditionally
   const startEdge = outgoingEdges[startNode.id]?.[0];
   if (!startEdge) return;
   onEdgeFollowed?.(startEdge.id);
-  let currentNodeId: string | undefined = startEdge.target;
 
-  while (currentNodeId) {
-    const node = runner.nodes.find(n => n.id === currentNodeId);
-    if (!node) break;
+  const ctx: SeqCtx = {
+    runner, collection, environment, certificates,
+    outgoingEdges, onNodeStatusChange, onEdgeFollowed, onLog,
+  };
 
-    if (node.type === 'end') {
-      onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
-      await delay(100);
-      onNodeStatusChange(node.id, { nodeId: node.id, status: 'success' });
-      break;
-    }
-
-    if (node.type === 'request') {
-      let request = collection.requests.find(r => r.id === node.data.requestId);
-      if (!request) {
-        for (const folder of collection.folders || []) {
-          const found = folder.requests.find(r => r.id === node.data.requestId);
-          if (found) { request = found; break; }
-        }
-      }
-
-      if (!request) {
-        onNodeStatusChange(node.id, {
-          nodeId: node.id, status: 'error',
-          error: 'Request not found in collection',
-        });
-        break;
-      }
-
-      onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
-
-      let response: ApiResponse;
-      try {
-        const mergedEnvironment: Environment = environment
-          ? { ...environment, variables: localVars }
-          : { id: 'runner-env', name: 'Runner', variables: localVars };
-
-        response = await HttpService.executeRequest(request, mergedEnvironment, certificates, collection);
-
-        onNodeStatusChange(node.id, {
-          nodeId: node.id,
-          status: response.status >= 400 || response.status === 0 ? 'error' : 'success',
-          response,
-        });
-      } catch (err: any) {
-        onNodeStatusChange(node.id, {
-          nodeId: node.id, status: 'error',
-          error: err.message || String(err),
-        });
-        break;
-      }
-
-      // Pick which outgoing edge to follow
-      const edges = outgoingEdges[node.id] || [];
-      let followedEdge: RunnerEdge | null = null;
-
-      for (const edge of edges) {
-        const condScript = edge.data?.condition?.trim();
-        if (!condScript) {
-          // Unconditional — acts as the else/default
-          followedEdge = edge;
-          break;
-        }
-        const { passed } = evaluateCondition(condScript, response, localVars);
-        if (passed) {
-          followedEdge = edge;
-          break;
-        }
-      }
-
-      if (!followedEdge) break; // No matching edge — stop
-
-      // Apply this specific edge's mappings then follow it
-      if (followedEdge.data?.mappings?.length) {
-        localVars = applyMappings(response, followedEdge.data.mappings, localVars);
-      }
-
-      onEdgeFollowed?.(followedEdge.id);
-      currentNodeId = followedEdge.target;
-    } else {
-      break;
-    }
-  }
+  await runSequence(startEdge.target, localVars, null, ctx);
 }
 
-function delay(ms: number): Promise<void> {
+function pause(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }

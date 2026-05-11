@@ -133,10 +133,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   if (activeRunner) {
     const runnerCollection = collections.find(c => c.id === activeRunner.collectionId);
     return (
-      <div className="request-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div className="request-tabs">
-          <button className="tab active">Runner</button>
-        </div>
+      <div className="request-panel" style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
         <div style={{ flex: 1, overflow: 'hidden' }}>
           {runnerCollection ? (
             <RunnerCanvas

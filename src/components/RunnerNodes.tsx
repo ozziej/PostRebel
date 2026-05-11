@@ -1,6 +1,27 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { RunnerNodeResult } from '../types';
+
+// Small delete button shown on hover — used by every deletable node
+const DeleteButton: React.FC<{ onDelete: () => void }> = ({ onDelete }) => (
+  <button
+    onPointerDown={e => e.stopPropagation()}
+    onMouseDown={e => e.stopPropagation()}
+    onClick={e => { e.stopPropagation(); onDelete(); }}
+    title="Delete node"
+    style={{
+      position: 'absolute', top: -8, right: -8,
+      width: 18, height: 18, borderRadius: '50%',
+      background: '#ef4444', border: '1.5px solid #111',
+      color: '#fff', fontSize: '0.6rem', fontWeight: 700,
+      cursor: 'pointer', display: 'flex', alignItems: 'center',
+      justifyContent: 'center', padding: 0, lineHeight: 1,
+      zIndex: 10,
+    }}
+  >
+    ✕
+  </button>
+);
 
 interface NodeStatusBadgeProps {
   status: RunnerNodeResult['status'];
@@ -74,6 +95,7 @@ interface RequestNodeProps {
     requestId?: string;
     result?: RunnerNodeResult;
     isSelected?: boolean;
+    onDelete?: () => void;
   };
 }
 
@@ -83,6 +105,7 @@ const METHOD_COLORS: Record<string, string> = {
 };
 
 export const RequestNode: React.FC<RequestNodeProps> = ({ data }) => {
+  const [hovered, setHovered] = useState(false);
   const method = data.method || 'GET';
   const result = data.result;
   const hasResponse = (result?.status === 'success' || result?.status === 'error') && result?.response;
@@ -94,18 +117,23 @@ export const RequestNode: React.FC<RequestNodeProps> = ({ data }) => {
   else if (result?.status === 'error')   border = '2px solid #ef4444';
 
   return (
-    <div style={{
-      minWidth: 180, maxWidth: 220,
-      background: data.isSelected ? '#243535' : '#1e2d2d',
-      border,
-      borderRadius: 8,
-      padding: '8px 10px',
-      color: '#fff',
-      fontSize: '0.8rem',
-      userSelect: 'none',
-      position: 'relative',
-      cursor: hasResponse ? 'pointer' : 'default',
-    }}>
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        minWidth: 180, maxWidth: 220,
+        background: data.isSelected ? '#243535' : '#1e2d2d',
+        border,
+        borderRadius: 8,
+        padding: '8px 10px',
+        color: '#fff',
+        fontSize: '0.8rem',
+        userSelect: 'none',
+        position: 'relative',
+        cursor: hasResponse ? 'pointer' : 'default',
+      }}
+    >
+      {hovered && data.onDelete && <DeleteButton onDelete={data.onDelete} />}
       <Handle type="target" position={Position.Top} id="in" style={{ background: '#888' }} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: hasResponse ? 4 : 0 }}>
@@ -158,21 +186,125 @@ export const RequestNode: React.FC<RequestNodeProps> = ({ data }) => {
   );
 };
 
+// ── DelayNode ────────────────────────────────────────────────────────────────
+
+interface DelayNodeProps {
+  data: { label: string; delayMs?: number; result?: RunnerNodeResult; onDelete?: () => void };
+}
+
+export const DelayNode: React.FC<DelayNodeProps> = ({ data }) => {
+  const [hovered, setHovered] = useState(false);
+  const ms = data.delayMs ?? 1000;
+  let border = '2px solid #d97706';
+  if (data.result?.status === 'running') border = '2px solid #f59e0b';
+  else if (data.result?.status === 'success') border = '2px solid #22c55e';
+  else if (data.result?.status === 'error') border = '2px solid #ef4444';
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width: 100, background: '#292524', border,
+        borderRadius: 8, padding: '8px 10px',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+        color: '#fff', fontSize: '0.75rem', fontWeight: 700,
+        userSelect: 'none', position: 'relative', cursor: 'pointer',
+      }}
+    >
+      {hovered && data.onDelete && <DeleteButton onDelete={data.onDelete} />}
+      <Handle type="target" position={Position.Top} id="in" style={{ background: '#d97706' }} />
+      <span style={{ fontSize: '1rem' }}>⏱</span>
+      <span style={{ color: '#fbbf24' }}>{ms}ms</span>
+      {data.result && <NodeStatusBadge status={data.result.status} />}
+      <Handle type="source" position={Position.Bottom} id="out" style={{ background: '#d97706' }} />
+    </div>
+  );
+};
+
+// ── ForEachNode ───────────────────────────────────────────────────────────────
+
+interface ForEachNodeProps {
+  data: {
+    label: string;
+    foreachExpression?: string;
+    foreachItemVar?: string;
+    result?: RunnerNodeResult;
+    onDelete?: () => void;
+  };
+}
+
+export const ForEachNode: React.FC<ForEachNodeProps> = ({ data }) => {
+  const [hovered, setHovered] = useState(false);
+  const expr = data.foreachExpression || '(not set)';
+  const itemVar = data.foreachItemVar || 'item';
+  let border = '2px solid #6366f1';
+  if (data.result?.status === 'running') border = '2px solid #f59e0b';
+  else if (data.result?.status === 'success') border = '2px solid #22c55e';
+  else if (data.result?.status === 'error') border = '2px solid #ef4444';
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        minWidth: 180, background: '#1e1b4b', border,
+        borderRadius: 8, padding: '8px 10px',
+        color: '#fff', fontSize: '0.78rem',
+        userSelect: 'none', position: 'relative', cursor: 'pointer',
+      }}
+    >
+      {hovered && data.onDelete && <DeleteButton onDelete={data.onDelete} />}
+      <Handle type="target" position={Position.Top} id="in" style={{ background: '#6366f1' }} />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ fontSize: '0.85rem' }}>↻</span>
+        <span style={{ fontWeight: 700, color: '#a5b4fc' }}>For Each</span>
+        {data.result && <NodeStatusBadge status={data.result.status} />}
+      </div>
+      <div style={{ fontSize: '0.68rem', color: '#818cf8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {expr}
+      </div>
+      <div style={{ fontSize: '0.65rem', color: '#555', marginTop: 2 }}>
+        item var: <code style={{ color: '#a5b4fc' }}>{itemVar}</code>
+      </div>
+
+      {/* Two source handles: body (left) and done (right) */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: '0.6rem', color: '#555' }}>
+        <span style={{ color: '#818cf8' }}>↓ body</span>
+        <span style={{ color: '#22c55e' }}>done →</span>
+      </div>
+      <Handle type="source" position={Position.Bottom} id="body"
+        style={{ left: '28%', background: '#6366f1' }} />
+      <Handle type="source" position={Position.Bottom} id="done"
+        style={{ left: '72%', background: '#22c55e' }} />
+    </div>
+  );
+};
+
 // ── EndNode ──────────────────────────────────────────────────────────────────
 
 interface EndNodeProps {
-  data: { label: string; result?: RunnerNodeResult };
+  data: { label: string; result?: RunnerNodeResult; onDelete?: () => void };
 }
 
-export const EndNode: React.FC<EndNodeProps> = ({ data }) => (
-  <div style={{
-    width: 64, height: 64, borderRadius: '50%',
-    background: '#7f1d1d', border: '2px solid #ef4444',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    color: '#fff', fontSize: '0.7rem', fontWeight: 700, userSelect: 'none', position: 'relative',
-  }}>
-    {data.result && <NodeStatusBadge status={data.result.status} />}
-    <span>END</span>
-    <Handle type="target" position={Position.Top} id="in" style={{ background: '#ef4444' }} />
-  </div>
-);
+export const EndNode: React.FC<EndNodeProps> = ({ data }) => {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width: 72, height: 72, borderRadius: '50%',
+        background: '#7f1d1d', border: '2px solid #ef4444',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        color: '#fff', fontSize: '0.7rem', fontWeight: 700, userSelect: 'none', position: 'relative',
+      }}
+    >
+      {hovered && data.onDelete && <DeleteButton onDelete={data.onDelete} />}
+      {data.result && <NodeStatusBadge status={data.result.status} />}
+      <span>END</span>
+      <Handle type="target" position={Position.Top} id="in" style={{ background: '#ef4444' }} />
+    </div>
+  );
+};

@@ -870,17 +870,19 @@ function App() {
           certificates={certificates}
         />
 
-        <ResponsePanel
-          response={currentResponse}
-          logs={logs}
-          isLoading={isLoading}
-          activeSavedResponse={activeSavedResponse}
-          onSaveResponse={handleSaveSavedResponse}
-          searchTerm={searchTerm}
-          searchOptions={searchOptions}
-          activeMatchIndex={activeMatchIndex}
-          onMatchCountChange={setTotalMatchCount}
-        />
+        {!activeRunner && (
+          <ResponsePanel
+            response={currentResponse}
+            logs={logs}
+            isLoading={isLoading}
+            activeSavedResponse={activeSavedResponse}
+            onSaveResponse={handleSaveSavedResponse}
+            searchTerm={searchTerm}
+            searchOptions={searchOptions}
+            activeMatchIndex={activeMatchIndex}
+            onMatchCountChange={setTotalMatchCount}
+          />
+        )}
         </div>
       </div>
 

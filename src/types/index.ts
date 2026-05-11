@@ -121,21 +121,31 @@ export interface RunnerEdge {
   targetHandle?: string;
   data?: {
     mappings?: DataMapping[];
-    condition?: string; // JS script: return true to follow this edge
+    condition?: string;  // JS script: return true to follow this edge
+    output?: string;     // expression to log when this edge is followed (body.x, {{var}}, status)
   };
 }
 
 export interface RunnerNodeData extends Record<string, unknown> {
   label: string;
-  requestId?: string;                                     // undefined for start/end nodes
-  variables?: { key: string; value: string }[];          // start node only: override env vars
+  requestId?: string;                                     // request nodes
+  variables?: { key: string; value: string }[];          // start node: env overrides
+  delayMs?: number;                                       // delay nodes
+  foreachExpression?: string;                             // foreach: array source (body.x.y or varName)
+  foreachItemVar?: string;                                // foreach: variable prefix for each item
 }
 
 export interface RunnerNode {
   id: string;
-  type: 'start' | 'request' | 'end';
+  type: 'start' | 'request' | 'end' | 'delay' | 'foreach';
   position: { x: number; y: number };
   data: RunnerNodeData;
+}
+
+// Runtime-only log entries produced during execution
+export interface RunnerLogEntry {
+  level: 'info' | 'success' | 'warn' | 'error' | 'script';
+  message: string;
 }
 
 export interface Runner {
@@ -154,6 +164,7 @@ export interface RunnerNodeResult {
   nodeId: string;
   status: 'idle' | 'running' | 'success' | 'error';
   response?: ApiResponse;
+  request?: ApiRequest;   // the request that was executed (pre-resolution template)
   error?: string;
 }
 
