@@ -222,6 +222,56 @@ export const DelayNode: React.FC<DelayNodeProps> = ({ data }) => {
   );
 };
 
+// ── DebugNode ─────────────────────────────────────────────────────────────────
+
+interface DebugNodeProps {
+  data: { label: string; debugScript?: string; result?: RunnerNodeResult; onDelete?: () => void };
+}
+
+export const DebugNode: React.FC<DebugNodeProps> = ({ data }) => {
+  const [hovered, setHovered] = useState(false);
+  const hasScript = !!(data.debugScript?.trim());
+
+  let border = '2px solid #475569';
+  if (data.result?.status === 'running') border = '2px solid #f59e0b';
+  else if (data.result?.status === 'success') border = '2px solid #22c55e';
+  else if (data.result?.status === 'error')   border = '2px solid #ef4444';
+
+  const preview = data.debugScript?.trim().split('\n')[0].slice(0, 36) ?? '';
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        minWidth: 160, background: '#1e2433', border,
+        borderRadius: 8, padding: '8px 10px',
+        color: '#fff', fontSize: '0.78rem',
+        userSelect: 'none', position: 'relative', cursor: 'pointer',
+      }}
+    >
+      {hovered && data.onDelete && <DeleteButton onDelete={data.onDelete} />}
+      <Handle type="target" position={Position.Top} id="in" style={{ background: '#64748b' }} />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: hasScript ? 3 : 0 }}>
+        <span style={{ fontSize: '0.85rem', flexShrink: 0 }}>{'{}'}</span>
+        <span style={{ fontWeight: 700, color: '#93c5fd' }}>Debug</span>
+        {data.result && <NodeStatusBadge status={data.result.status} />}
+      </div>
+
+      {hasScript ? (
+        <div style={{ fontSize: '0.65rem', color: '#64748b', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {preview}{data.debugScript!.trim().length > 36 ? '…' : ''}
+        </div>
+      ) : (
+        <div style={{ fontSize: '0.62rem', color: '#475569', fontStyle: 'italic' }}>click to add script</div>
+      )}
+
+      <Handle type="source" position={Position.Bottom} id="out" style={{ background: '#64748b' }} />
+    </div>
+  );
+};
+
 // ── ForEachNode ───────────────────────────────────────────────────────────────
 
 interface ForEachNodeProps {

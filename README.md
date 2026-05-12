@@ -318,7 +318,7 @@ Click the Start node to override environment variables for that run only. Values
 
 #### For Each node
 
-Configure an **array source** (`body.advances` or a variable name) and an **item variable prefix** (`advance`). Each item's fields are injected as `{{advance_fieldName}}`; the full item is available as `{{advance}}`. The node has two source handles: **body** (bottom-left, the per-item sequence) and **done** (bottom-right, where to continue after all items).
+Configure an **array source** (`body.items` or a variable name) and an **item variable prefix** (`item`). Each item's fields are injected as `{{item_fieldName}}`; the full item is available as `{{item}}`. The node has two source handles: **body** (bottom-left, the per-item sequence) and **done** (bottom-right, where to continue after all items).
 
 #### Saving and reverting
 

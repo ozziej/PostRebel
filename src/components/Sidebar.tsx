@@ -50,6 +50,8 @@ interface SidebarProps {
   onEditCollectionAuth: (collection: Collection) => void;
   onSelectRunner: (runner: Runner) => void;
   onDeleteRunner: (runnerId: string) => void;
+  onRenameRunner: (runnerId: string, newName: string) => void;
+  onDuplicateRunner: (runner: Runner) => void;
   onAddRunner: (collection: Collection) => void;
 }
 
@@ -84,6 +86,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onEditCollectionAuth,
   onSelectRunner,
   onDeleteRunner,
+  onRenameRunner,
+  onDuplicateRunner,
   onAddRunner,
 }) => {
   const [addDropdownOpenId, setAddDropdownOpenId] = useState<string | null>(null);
@@ -1180,18 +1184,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       backgroundColor: activeRunner?.id === runner.id ? '#0d737720' : 'transparent',
                       borderTop: '1px solid #333',
                     }}
-                    onClick={() => onSelectRunner(runner)}
+                    onClick={() => { if (editingRunner !== runner.id) onSelectRunner(runner); }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                      <span className="http-method RUNNER" style={{
-                        background: '#7c3aed',
-                        color: '#fff',
-                        fontSize: '0.55rem',
-                        fontWeight: 700,
-                        padding: '1px 5px',
-                        borderRadius: 4,
-                        flexShrink: 0,
-                        letterSpacing: '0.5px',
+                      <span style={{
+                        background: '#7c3aed', color: '#fff',
+                        fontSize: '0.55rem', fontWeight: 700,
+                        padding: '1px 5px', borderRadius: 4,
+                        flexShrink: 0, letterSpacing: '0.5px',
                       }}>
                         RUNNER
                       </span>
@@ -1204,10 +1204,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           style={{ fontSize: '0.85rem', flex: 1, marginRight: '0.5rem' }}
                           onKeyPress={(e) => {
                             if (e.key === 'Enter') {
+                              if (editName.trim()) onRenameRunner(runner.id, editName.trim());
                               setEditingRunner(null);
+                              setEditName('');
                             }
                           }}
-                          onBlur={() => setEditingRunner(null)}
+                          onBlur={() => {
+                            if (editName.trim()) onRenameRunner(runner.id, editName.trim());
+                            setEditingRunner(null);
+                            setEditName('');
+                          }}
                           onClick={(e) => e.stopPropagation()}
                           autoFocus
                         />
@@ -1217,14 +1223,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         </span>
                       )}
                     </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onDeleteRunner(runner.id); }}
-                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                      className="button-secondary button"
-                      title="Delete runner"
-                    >
-                      🗑️
-                    </button>
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        onClick={(e) => openMenu(e, `runner-${runner.id}`)}
+                        className="button-secondary button"
+                        style={{ fontSize: '0.8rem', padding: '0.15rem 0.4rem', letterSpacing: '0.05em' }}
+                        title="More actions"
+                      >
+                        ···
+                      </button>
+                      {openMenuId === `runner-${runner.id}` && menuPos && (
+                        <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
+                          <MenuItem icon="✏️" label="Rename" onClick={() => {
+                            setEditingRunner(runner.id);
+                            setEditName(runner.name);
+                          }} />
+                          <MenuItem icon="⿻" label="Duplicate" onClick={() => onDuplicateRunner(runner)} />
+                          <MenuDivider />
+                          <MenuItem icon="🗑️" label="Delete" onClick={() => onDeleteRunner(runner.id)} destructive />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

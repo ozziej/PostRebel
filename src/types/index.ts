@@ -133,11 +133,12 @@ export interface RunnerNodeData extends Record<string, unknown> {
   delayMs?: number;                                       // delay nodes
   foreachExpression?: string;                             // foreach: array source (body.x.y or varName)
   foreachItemVar?: string;                                // foreach: variable prefix for each item
+  debugScript?: string;                                   // debug nodes: JS script with console.log
 }
 
 export interface RunnerNode {
   id: string;
-  type: 'start' | 'request' | 'end' | 'delay' | 'foreach';
+  type: 'start' | 'request' | 'end' | 'delay' | 'foreach' | 'debug';
   position: { x: number; y: number };
   data: RunnerNodeData;
 }

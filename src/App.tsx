@@ -585,6 +585,28 @@ function App() {
     }
   };
 
+  const handleRenameRunner = async (runnerId: string, newName: string) => {
+    if (!activeWorkspace) return;
+    const runner = runners.find(r => r.id === runnerId);
+    if (!runner) return;
+    const updated = { ...runner, name: newName, updatedAt: new Date().toISOString() };
+    await window.electronAPI.saveRunner(activeWorkspace.id, updated);
+    setRunners(prev => prev.map(r => r.id === runnerId ? updated : r));
+    if (activeRunner?.id === runnerId) setActiveRunner(updated);
+  };
+
+  const handleDuplicateRunner = async (runner: Runner) => {
+    if (!activeWorkspace) return;
+    const now = new Date().toISOString();
+    const copy: Runner = { ...runner, id: Date.now().toString(), name: `${runner.name} (copy)`, createdAt: now, updatedAt: now };
+    await window.electronAPI.saveRunner(activeWorkspace.id, copy);
+    setRunners(prev => [...prev, copy]);
+    setActiveRunner(copy);
+    setActiveRequest(null);
+    setActiveSavedResponse(null);
+    setCurrentResponse(null);
+  };
+
   const handleDeleteRunner = async (runnerId: string) => {
     if (!activeWorkspace) return;
     if (!confirm('Are you sure you want to delete this runner?')) return;
@@ -850,6 +872,8 @@ function App() {
             onEditCollectionAuth={handleEditCollectionAuth}
             onSelectRunner={handleSelectRunner}
             onDeleteRunner={handleDeleteRunner}
+            onRenameRunner={handleRenameRunner}
+            onDuplicateRunner={handleDuplicateRunner}
             onAddRunner={handleAddRunner}
           />
         </ResizableSidebar>

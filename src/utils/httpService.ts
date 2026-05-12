@@ -2,8 +2,20 @@ import { ApiRequest, ApiResponse, Environment, Certificate, Collection } from '.
 
 export class HttpService {
   private static replaceVariables(text: string, environment: Environment): string {
-    return text.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
-      return environment.variables[varName] || match;
+    return text.replace(/\{\{([\w.]+)\}\}/g, (match, varName) => {
+      const dot = varName.indexOf('.');
+      if (dot === -1) return environment.variables[varName] || match;
+      // Dot notation: {{item.userId}} → look up "item" as JSON, then navigate ".userId"
+      const root = environment.variables[varName.slice(0, dot)];
+      if (!root) return match;
+      try {
+        let val: any = JSON.parse(root);
+        for (const p of varName.slice(dot + 1).split('.')) {
+          if (val == null) return match;
+          val = val[p];
+        }
+        return val != null ? String(val) : match;
+      } catch { return match; }
     });
   }
 

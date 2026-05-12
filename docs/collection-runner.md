@@ -207,10 +207,10 @@ Click **↻ For Each** in the toolbar to add a For Each node, then click it to c
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| Array source | A dot-notation path into the last response, or a variable name holding a JSON array | `body.advanceBalance.advances` or `advances` |
-| Item variable prefix | Prefix for injected variables | `advance` |
+| Array source | A dot-notation path into the last response, or a variable name holding a JSON array | `body.items.item` or `items` |
+| Item variable prefix | Prefix for injected variables | `item` |
 
-Each item's fields are injected as `{{advance_fieldName}}` (e.g. `{{advance_advancesUuid}}`). The full item JSON is available as `{{advance}}`.
+Each item's fields are injected as `{{item_fieldName}}` (e.g. `{{item_itemUuid}}`). The full item JSON is available as `{{item}}`.
 
 ### For Each handles
 

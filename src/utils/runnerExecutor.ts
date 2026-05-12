@@ -10,7 +10,7 @@ function walkPath(data: any, segments: string[]): any {
   let current = data;
   for (const segment of segments) {
     if (current == null) return undefined;
-    // Handle bracket indices: "advances[0]" → ["advances", "0"]
+    // Handle bracket indices: "item[0]" → ["item", "0"]
     const tokens = segment.split(/\[(\d+)\]/).filter(t => t !== '');
     for (const token of tokens) {
       if (current == null) return undefined;
@@ -64,6 +64,23 @@ function applyMappings(
   return updated;
 }
 
+// ── Script variable preparation ──────────────────────────────────────────────
+// Variables are stored as strings. Values that look like JSON objects or arrays
+// are pre-parsed so scripts can use dot notation: variables.item.id instead of
+// JSON.parse(variables.item).id
+
+function parseVarsForScript(vars: Record<string, string>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(vars)) {
+    if (value && (value.startsWith('{') || value.startsWith('['))
+               && (value.endsWith('}')  || value.endsWith(']'))) {
+      try { out[key] = JSON.parse(value); continue; } catch { /* keep as string */ }
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 // ── Condition evaluation ──────────────────────────────────────────────────────
 //
 // Available in scripts: response, body, status, headers, variables, console
@@ -93,7 +110,7 @@ export function evaluateCondition(
 
     const result = fn(
       { status, statusText: response.statusText, headers, body, data: response.data },
-      body, status, headers, { ...variables }, mockConsole,
+      body, status, headers, parseVarsForScript(variables), mockConsole,
     );
 
     return { passed: Boolean(result) };
@@ -106,7 +123,20 @@ export function evaluateCondition(
 
 function resolveRequest(request: ApiRequest, vars: Record<string, string>): ApiRequest {
   const sub = (text: string): string =>
-    text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
+    text.replace(/\{\{([\w.]+)\}\}/g, (match, key) => {
+      const dot = key.indexOf('.');
+      if (dot === -1) return vars[key] ?? match;
+      const root = vars[key.slice(0, dot)];
+      if (!root) return match;
+      try {
+        let val: any = JSON.parse(root);
+        for (const p of key.slice(dot + 1).split('.')) {
+          if (val == null) return match;
+          val = val[p];
+        }
+        return val != null ? String(val) : match;
+      } catch { return match; }
+    });
 
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(request.headers)) {
@@ -131,6 +161,46 @@ function resolveRequest(request: ApiRequest, vars: Record<string, string>): ApiR
   return { ...request, url: sub(request.url), headers, body, auth };
 }
 
+// ── Debug script evaluation ───────────────────────────────────────────────────
+// Like evaluateCondition but: works with null response, never returns a value,
+// and uses prettier JSON.stringify for console.log output.
+
+function evaluateDebugScript(
+  script: string,
+  lastResponse: ApiResponse | null,
+  variables: Record<string, string>,
+  onLog?: (entry: RunnerLogEntry) => void,
+): void {
+  try {
+    const body = lastResponse?.data ?? null;
+    const status = lastResponse?.status ?? 0;
+    const headers = lastResponse?.headers ?? {};
+
+    const fmt = (a: any) =>
+      typeof a === 'object' && a !== null ? JSON.stringify(a, null, 2) : String(a);
+
+    const mockConsole = {
+      log:   (...args: any[]) => onLog?.({ level: 'script', message: args.map(fmt).join(' ') }),
+      warn:  (...args: any[]) => onLog?.({ level: 'warn',   message: 'warn: '  + args.map(fmt).join(' ') }),
+      error: (...args: any[]) => onLog?.({ level: 'error',  message: 'error: ' + args.map(fmt).join(' ') }),
+    };
+
+    const fn = new Function(
+      'response', 'body', 'status', 'headers', 'variables', 'console',
+      '"use strict";\n' + script,
+    );
+
+    fn(
+      lastResponse
+        ? { status, statusText: lastResponse.statusText, headers, body, data: lastResponse.data }
+        : null,
+      body, status, headers, parseVarsForScript(variables), mockConsole,
+    );
+  } catch (err: any) {
+    onLog?.({ level: 'error', message: `Debug error: ${err.message || String(err)}` });
+  }
+}
+
 // ── ForEach helpers ───────────────────────────────────────────────────────────
 
 function extractArray(
@@ -140,9 +210,12 @@ function extractArray(
 ): any[] {
   const trimmed = expression.trim();
 
-  // dot-notation path into the response body
-  if (trimmed.startsWith('body.') && lastResponse) {
-    const value = walkPath(lastResponse.data, trimmed.slice(5).split('.'));
+  // "body" alone = the response body IS the array
+  // "body.field" = dot-notation path into the body
+  if ((trimmed === 'body' || trimmed.startsWith('body.')) && lastResponse) {
+    const value = trimmed === 'body'
+      ? lastResponse.data
+      : walkPath(lastResponse.data, trimmed.slice(5).split('.').filter(Boolean));
     return Array.isArray(value) ? value : [];
   }
 
@@ -219,6 +292,24 @@ async function runSequence(
       ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
       ctx.onLog?.({ level: 'info', message: `⏱ Waiting ${ms}ms…` });
       await pause(ms);
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'success' });
+      const nextEdge = ctx.outgoingEdges[node.id]?.[0];
+      if (!nextEdge) break;
+      ctx.onEdgeFollowed?.(nextEdge.id);
+      currentNodeId = nextEdge.target;
+      continue;
+    }
+
+    // ── Debug ─────────────────────────────────────────────────────────────────
+    if (node.type === 'debug') {
+      const script = (node.data.debugScript as string | undefined)?.trim() || '';
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
+      ctx.onLog?.({ level: 'info', message: `{} Debug` });
+      if (script) {
+        evaluateDebugScript(script, resp, vars, ctx.onLog);
+      } else {
+        ctx.onLog?.({ level: 'warn', message: 'Debug node has no script — click it to add one' });
+      }
       ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'success' });
       const nextEdge = ctx.outgoingEdges[node.id]?.[0];
       if (!nextEdge) break;
