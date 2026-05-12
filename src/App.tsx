@@ -287,30 +287,37 @@ function App() {
   };
 
   const handleRequestChange = async (updatedRequest: ApiRequest) => {
-    // Update the active request state
-    setActiveRequest(updatedRequest);
-
     // Find the collection containing this request (top-level or inside a folder)
     const collection = collections.find(c =>
       c.requests.some(r => r.id === updatedRequest.id) ||
       c.folders?.some(f => f.requests.some(r => r.id === updatedRequest.id))
     );
 
+    // Preserve the name from the collection's current state.
+    // Renames go through the sidebar directly (onSaveCollection) and don't update
+    // activeRequest/localRequest, so updatedRequest.name may be stale. Always
+    // prefer the name already stored in the collection to avoid overwriting it.
+    const currentInCollection =
+      collection?.requests.find(r => r.id === updatedRequest.id) ??
+      collection?.folders?.flatMap(f => f.requests).find(r => r.id === updatedRequest.id);
+
+    const merged = currentInCollection
+      ? { ...updatedRequest, name: currentInCollection.name }
+      : updatedRequest;
+
+    setActiveRequest(merged);
+
     if (collection) {
       const updatedCollection = {
         ...collection,
-        requests: collection.requests.map(r =>
-          r.id === updatedRequest.id ? updatedRequest : r
-        ),
+        requests: collection.requests.map(r => r.id === merged.id ? merged : r),
         folders: collection.folders?.map(f => ({
           ...f,
-          requests: f.requests.map(r =>
-            r.id === updatedRequest.id ? updatedRequest : r
-          ),
+          requests: f.requests.map(r => r.id === merged.id ? merged : r),
         })),
       };
       await saveCollection(updatedCollection);
-      console.log('[App] Auto-saved request:', updatedRequest.name);
+      console.log('[App] Auto-saved request:', merged.name);
     }
   };
 
