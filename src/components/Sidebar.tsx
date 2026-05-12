@@ -1,10 +1,42 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Collection, Environment, ApiRequest, Workspace, SavedResponse, CollectionFolder, Runner } from '../types';
+
+// ── Reusable context-menu primitives ──────────────────────────────────────────
+
+const MenuItem: React.FC<{
+  icon: string;
+  label: string;
+  onClick: () => void;
+  destructive?: boolean;
+}> = ({ icon, label, onClick, destructive }) => (
+  <div
+    onClick={e => { e.stopPropagation(); onClick(); }}
+    onMouseEnter={e => (e.currentTarget.style.background = '#2a2a2a')}
+    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+    style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      padding: '0.4rem 0.85rem', cursor: 'pointer',
+      fontSize: '0.82rem', color: destructive ? '#f87171' : '#e0e0e0',
+    }}
+  >
+    <span style={{ width: 14, fontSize: '0.85rem', textAlign: 'center', flexShrink: 0 }}>{icon}</span>
+    {label}
+  </div>
+);
+
+const MenuDivider = () => <div style={{ height: 1, background: '#333', margin: '2px 0' }} />;
+
+// Base styles shared by all context menus — position/coordinates are set dynamically
+const menuBase: React.CSSProperties = {
+  background: '#1e1e1e', border: '1px solid #444', borderRadius: 6,
+  minWidth: 164, boxShadow: '0 4px 12px rgba(0,0,0,0.5)', overflow: 'hidden',
+};
 
 interface SidebarProps {
   activeWorkspace: Workspace | null;
   collections: Collection[];
   savedResponses: SavedResponse[];
+  activeRequest: ApiRequest | null;
   activeSavedResponse: SavedResponse | null;
   runners: Runner[];
   activeRunner: Runner | null;
@@ -38,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeWorkspace,
   collections,
   savedResponses,
+  activeRequest,
   activeSavedResponse,
   runners,
   activeRunner,
@@ -55,6 +88,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [addDropdownOpenId, setAddDropdownOpenId] = useState<string | null>(null);
   const [editingRunner, setEditingRunner] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+
+  // Close context menu when clicking anywhere outside it
+  useEffect(() => {
+    if (!openMenuId) return;
+    const close = () => { setOpenMenuId(null); setMenuPos(null); };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [openMenuId]);
+
+  // Open a context menu anchored to the button that triggered it
+  const openMenu = (e: React.MouseEvent, menuId: string) => {
+    e.stopPropagation();
+    if (openMenuId === menuId) {
+      setOpenMenuId(null);
+      setMenuPos(null);
+    } else {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setMenuPos({ top: rect.bottom + 2, right: window.innerWidth - rect.right });
+      setOpenMenuId(menuId);
+    }
+  };
   const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
   const [expandedRequests, setExpandedRequests] = useState<Set<string>>(new Set());
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -170,6 +226,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return;
     }
     await onDeleteRequest(collection.id, requestId);
+  };
+
+  const duplicateRequest = async (collection: Collection, request: ApiRequest, folderId?: string) => {
+    const copy: ApiRequest = { ...request, id: `${Date.now()}`, name: `${request.name} (copy)` };
+    let updated: Collection;
+    if (folderId) {
+      updated = {
+        ...collection,
+        folders: collection.folders?.map(f => {
+          if (f.id !== folderId) return f;
+          const idx = f.requests.findIndex(r => r.id === request.id);
+          const reqs = [...f.requests];
+          reqs.splice(idx + 1, 0, copy);
+          return { ...f, requests: reqs };
+        }),
+      };
+    } else {
+      const idx = collection.requests.findIndex(r => r.id === request.id);
+      const reqs = [...collection.requests];
+      reqs.splice(idx + 1, 0, copy);
+      updated = { ...collection, requests: reqs };
+    }
+    await onSaveCollection(updated);
+    onSelectRequest(copy);
   };
 
   const startEditingCollection = (collection: Collection) => {
@@ -694,52 +774,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         </div>
                       )}
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setNewFolderCollectionId(collection.id);
-                        setNewFolderName('');
-                        setExpandedCollections(prev => new Set([...prev, collection.id]));
-                      }}
-                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                      className="button-secondary button"
-                      title="Add folder"
-                    >
-                      📁
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        startEditingCollection(collection);
-                      }}
-                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                      className="button-secondary button"
-                      title="Rename collection"
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEditCollectionAuth(collection);
-                      }}
-                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                      className="button-secondary button"
-                      title="Edit collection authentication"
-                    >
-                      🔐
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteCollection(collection.id, collection.name);
-                      }}
-                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                      className="button-secondary button"
-                      title="Delete collection"
-                    >
-                      🗑️
-                    </button>
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        onClick={(e) => openMenu(e, `col-${collection.id}`)}
+                        className="button-secondary button"
+                        style={{ fontSize: '0.8rem', padding: '0.15rem 0.4rem', letterSpacing: '0.05em' }}
+                        title="More actions"
+                      >
+                        ···
+                      </button>
+                      {openMenuId === `col-${collection.id}` && menuPos && (
+                        <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
+                          <MenuItem icon="📁" label="Add Folder" onClick={() => {
+                            setNewFolderCollectionId(collection.id);
+                            setNewFolderName('');
+                            setExpandedCollections(prev => new Set([...prev, collection.id]));
+                          }} />
+                          <MenuItem icon="✏️" label="Rename" onClick={() => startEditingCollection(collection)} />
+                          <MenuItem icon="🔐" label="Edit Authentication" onClick={() => onEditCollectionAuth(collection)} />
+                          <MenuDivider />
+                          <MenuItem icon="🗑️" label="Delete" onClick={() => deleteCollection(collection.id, collection.name)} destructive />
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
@@ -860,6 +917,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     padding: '0.5rem 0.75rem 0.5rem 0.25rem',
                                     cursor: editingRequest !== request.id ? 'grab' : 'default',
                                     opacity: isReqDragging ? 0.4 : 1,
+                                    backgroundColor: activeRequest?.id === request.id ? '#0d737720' : 'transparent',
                                   }}
                                   onClick={() => { if (editingRequest !== request.id) onSelectRequest(request); }}
                                 >
@@ -896,8 +954,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         <span className={`http-method ${request.method}`}>{request.method}</span>
                                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{request.name}</span>
                                       </div>
-                                      <button onClick={(e) => { e.stopPropagation(); startEditingRequest(request); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginRight: '0.25rem' }} className="button-secondary button" title="Rename request">✏️</button>
-                                      <button onClick={(e) => { e.stopPropagation(); deleteRequest(collection, request.id, request.name); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} className="button-secondary button" title="Delete request">🗑️</button>
+                                      <div style={{ position: 'relative' }}>
+                                        <button onClick={(e) => openMenu(e, `req-${request.id}`)} className="button-secondary button" style={{ fontSize: '0.8rem', padding: '0.15rem 0.4rem', letterSpacing: '0.05em' }} title="More actions">···</button>
+                                        {openMenuId === `req-${request.id}` && menuPos && (
+                                          <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
+                                            <MenuItem icon="✏️" label="Rename" onClick={() => startEditingRequest(request)} />
+                                            <MenuItem icon="⿻" label="Duplicate" onClick={() => duplicateRequest(collection, request, folder.id)} />
+                                            <MenuDivider />
+                                            <MenuItem icon="🗑️" label="Delete" onClick={() => deleteRequest(collection, request.id, request.name)} destructive />
+                                          </div>
+                                        )}
+                                      </div>
                                     </>
                                   )}
                                 </div>
@@ -959,6 +1026,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           padding: '0.5rem 0.75rem 0.5rem 0.25rem',
                           cursor: editingRequest !== request.id ? 'grab' : 'default',
                           opacity: isReqDragging ? 0.4 : 1,
+                          backgroundColor: activeRequest?.id === request.id ? '#0d737720' : 'transparent',
                         }}
                         onClick={() => { if (editingRequest !== request.id) onSelectRequest(request); }}
                       >
@@ -1007,18 +1075,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               <span className={`http-method ${request.method}`}>{request.method}</span>
                               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{request.name}</span>
                             </div>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); startEditingRequest(request); }}
-                              style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginRight: '0.25rem' }}
-                              className="button-secondary button"
-                              title="Rename request"
-                            >✏️</button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); deleteRequest(collection, request.id, request.name); }}
-                              style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                              className="button-secondary button"
-                              title="Delete request"
-                            >🗑️</button>
+                            <div style={{ position: 'relative' }}>
+                              <button onClick={(e) => openMenu(e, `req-${request.id}`)} className="button-secondary button" style={{ fontSize: '0.8rem', padding: '0.15rem 0.4rem', letterSpacing: '0.05em' }} title="More actions">···</button>
+                              {openMenuId === `req-${request.id}` && menuPos && (
+                                <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
+                                  <MenuItem icon="✏️" label="Rename" onClick={() => startEditingRequest(request)} />
+                                  <MenuItem icon="⿻" label="Duplicate" onClick={() => duplicateRequest(collection, request)} />
+                                  <MenuDivider />
+                                  <MenuItem icon="🗑️" label="Delete" onClick={() => deleteRequest(collection, request.id, request.name)} destructive />
+                                </div>
+                              )}
+                            </div>
                           </>
                         )}
                       </div>

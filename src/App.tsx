@@ -828,6 +828,7 @@ function App() {
           <Sidebar
             activeWorkspace={activeWorkspace}
             collections={collections}
+            activeRequest={activeRequest}
             savedResponses={savedResponses}
             activeSavedResponse={activeSavedResponse}
             runners={runners}

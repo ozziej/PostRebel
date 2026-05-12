@@ -74,7 +74,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   collections = [],
   certificates = [],
 }) => {
-  const [activeTab, setActiveTab] = useState<'headers' | 'body' | 'auth' | 'scripts' | 'runner'>('headers');
+  const [activeTab, setActiveTab] = useState<'headers' | 'body' | 'auth' | 'scripts' | 'runner'>('body');
   const [localRequest, setLocalRequest] = useState<ApiRequest | null>(null);
   const [jsonValidation, setJsonValidation] = useState<{ valid: boolean; message: string } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -83,6 +83,11 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   useEffect(() => {
     setLocalRequest(request);
   }, [request]);
+
+  // Reset to body tab when switching to a different request
+  useEffect(() => {
+    setActiveTab('body');
+  }, [request?.id]);
 
   // Auto-switch to runner tab when activeRunner changes
   useEffect(() => {
