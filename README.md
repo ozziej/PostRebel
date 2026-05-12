@@ -31,7 +31,7 @@ A local API testing tool with git support - your Postman alternative.
 - **Find in request/response** - `Cmd+F` / `Ctrl+F` searches across all request and response content with plain text, case-sensitive, whole-word, and regex modes
 - **Keyboard shortcuts** - Configurable shortcuts for common actions (Send: `Cmd+Enter` / `Ctrl+Enter`); customise in Settings
 - **Image responses** - APIs that return images (`image/*`) display the image inline with download and actual-size controls
-- **Collection Runner** - Visual flow-based runner with Request, Delay, and For Each node types; JavaScript conditional branching; per-edge data mappings and output expressions; execution log with `console.log` support; Start-node variable overrides; and inline request+response inspection per node
+- **Collection Runner** - Visual flow-based runner with Request, Debug, Delay, and For Each node types; JavaScript conditional branching; per-edge data mappings and output expressions; execution log with `console.log` support; dot-notation variable access (`{{item.userId}}`); Start-node variable overrides; and inline request+response inspection per node
 
 ## Search and Find
 
@@ -276,17 +276,18 @@ The Collection Runner lets you chain multiple requests together into a visual fl
 |------|---------|
 | **Start** (green circle) | Entry point — click to set per-run variable overrides |
 | **Request** (dark card) | Executes one API request from the collection |
+| **Debug** (blue-grey card) | Runs a JS snippet for inspection; always a pass-through |
 | **Delay** (amber card) | Pauses for a configurable number of milliseconds |
 | **For Each** (indigo card) | Iterates over an array, running a sub-sequence per item |
 | **End** (red circle) | Marks the end of a path |
 
 #### Building the flow
 
-- **+ Add Request** — searchable dropdown listing all requests in the collection; new nodes appear at the centre of the visible canvas.
-- **⏱ Delay** and **↻ For Each** buttons add those node types at the canvas centre.
+- **+ Add Request** — searchable dropdown; new nodes appear at the centre of the visible canvas.
+- **+ Nodes ▾** — dropdown to add a **Debug Script**, **Delay**, or **For Each** node.
 - **Connect nodes** by dragging from a bottom handle to a top handle.
 - **Reconnect an edge** by dragging either of its endpoints to a new node.
-- **Delete a node** by hovering it and clicking the red **✕** that appears — the node and all its edges are removed (with confirmation).
+- **Delete a node** by hovering it and clicking the red **✕** — the node and all its edges are removed (with confirmation).
 
 #### Viewing requests and responses
 
@@ -316,13 +317,28 @@ return body.access_token !== undefined;
 
 Click the Start node to override environment variables for that run only. Values here take precedence over the active environment and are never written back to it. Useful for pointing at a staging URL or pinning a test user ID without changing your environment.
 
+#### Debug node
+
+Click the node to write a JavaScript snippet. Use `console.log()` to inspect values mid-flow — output appears in the execution log in teal. The node is always a pass-through. Variables holding JSON objects (e.g. For Each items) are automatically pre-parsed, so you can use direct dot access:
+
+```javascript
+console.log(variables.item.userId);  // dot notation — works directly
+console.log(variables.item_userId);   // underscore notation — also works
+console.log('all vars:', variables);
+```
+
 #### For Each node
 
-Configure an **array source** (`body.items` or a variable name) and an **item variable prefix** (`item`). Each item's fields are injected as `{{item_fieldName}}`; the full item is available as `{{item}}`. The node has two source handles: **body** (bottom-left, the per-item sequence) and **done** (bottom-right, where to continue after all items).
+Configure an **array source** and an **item variable prefix** (`item`). The array source can be:
+- `body` — when the response body **is** the array (e.g. `[{...}, {...}]`)
+- `body.field` — a nested path (e.g. `body.data.advances`)
+- a variable name — mapped from a previous edge
+
+Each item's fields are available as `{{item.fieldName}}` (dot notation) or `{{item_fieldName}}` (underscore). Both work in URLs, headers, and bodies. The node has two source handles: **body** (bottom-left, per-item sequence) and **done** (bottom-right, after all items).
 
 #### Saving and reverting
 
-- **Save** / blur the runner name to persist changes.
+- **Save** to persist changes. Rename via the sidebar **···** menu on the runner item.
 - **Revert** to discard unsaved changes and restore the last saved version.
 - **Export / Import** runner state as `.runner.json` for sharing or backup.
 
@@ -495,7 +511,7 @@ npm run dist         # Create distributable packages
     - ✅ **Find (in request and response)** - Press `Ctrl+F` / `Cmd+F` to search across all request and response content with regex support
     - ✅ **Configurable Shortcut keys for UI** - Customizable keyboard shortcuts including Send request (`Cmd+Enter`/`Ctrl+Enter`), configurable in Settings
     - ✅ **Image support in Response (Binary Data)** - View images directly in response panel with download and zoom controls
-- ✅ **Collection Runner** - Visual flow-based runner: Request / Delay / For Each nodes, JavaScript conditions, data mappings, edge output expressions, execution log, Start-node variable overrides, inline request+response inspection
+- ✅ **Collection Runner** - Visual flow-based runner: Request / Debug / Delay / For Each nodes, JavaScript conditions, dot-notation variable access, data mappings, edge output expressions, execution log, Start-node variable overrides, inline request+response inspection
 
 🚧 **Planned:**
 - Collection export (Postman v2, OpenAPI)

@@ -26,11 +26,10 @@ The canvas fills the full panel area when a runner is active. It contains:
 
 | Button | Purpose |
 |--------|---------|
-| Runner name field | Rename the runner (auto-saves on blur) |
+| Runner name | Display only — rename via the sidebar **···** menu |
 | **▶ Run** | Execute the flow |
 | **+ Add Request** | Searchable dropdown — pick any request from the collection |
-| **⏱ Delay** | Add a Delay node at the centre of the canvas |
-| **↻ For Each** | Add a For Each node at the centre of the canvas |
+| **+ Nodes ▾** | Dropdown to add a **Debug Script**, **Delay**, or **For Each** node |
 | **Save** | Persist current state to disk |
 | **Revert** | Discard unsaved changes and reload the last saved version |
 | **Export** | Download runner as `.runner.json` |
@@ -41,8 +40,9 @@ The canvas fills the full panel area when a runner is active. It contains:
 
 | Node | Appearance | Purpose |
 |------|-----------|---------|
-| **Start** | Green circle | Entry point — every run begins here |
+| **Start** | Green circle | Entry point — every run begins here; click to set variable overrides |
 | **Request** | Dark card | Executes one API request from the collection |
+| **Debug** | Blue-grey card | Runs a JavaScript snippet for inspection; always a pass-through |
 | **Delay** | Amber card | Pauses execution for a configurable number of milliseconds |
 | **For Each** | Indigo card | Iterates over an array, running a sub-sequence per item |
 | **End** | Red circle | Marks the end of a path |
@@ -195,22 +195,78 @@ status                  → logs the HTTP status code
 
 The value appears in the execution log as a green `▶ expression: value` entry.
 
+## Debug Node
+
+Click **+ Nodes ▾ → Debug Script** to add a Debug node. Click the node to open a JavaScript editor. The script runs when the runner reaches that node, logs all `console.log()` output to the execution log in teal, then **always continues** to the next connected node — it never stops the flow.
+
+```javascript
+// Inspect what For Each injected for this item:
+console.log('item:', variables.item);          // full object
+console.log('userId:', variables.item.userId); // dot notation — direct property access
+console.log('id:', variables.item.id);
+
+// Check the last HTTP response:
+console.log('status:', status);
+console.log('body:', body);
+
+// Dump all current variables:
+console.log('all vars:', variables);
+```
+
+**Available identifiers** (same as condition scripts):
+
+| Name | Value |
+|------|-------|
+| `body` | Last response body (parsed JSON or string) |
+| `status` | Last HTTP status code |
+| `headers` | Last response headers |
+| `variables` | All current variables — For Each items are pre-parsed objects, so dot access works |
+| `response` | Full response object |
+| `console` | `log`, `warn`, `error` — all captured to the execution log |
+
+The node is always a pass-through. Even if the script throws an error, the flow continues and the error is logged in red.
+
 ## Delay Node
 
-Click **⏱ Delay** in the toolbar to add a Delay node, then click the node to set the duration in milliseconds. Drop it between any two nodes — the runner waits before continuing.
+Click **+ Nodes ▾ → Delay** to add a Delay node, then click the node to set the duration in milliseconds. Drop it between any two nodes — the runner waits before continuing.
 
 **Use cases:** rate limiting, waiting for a background job to process before polling.
 
 ## For Each Node
 
-Click **↻ For Each** in the toolbar to add a For Each node, then click it to configure:
+Click **+ Nodes ▾ → For Each** in the toolbar to add a For Each node, then click it to configure:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| Array source | A dot-notation path into the last response, or a variable name holding a JSON array | `body.items.item` or `items` |
+| Array source | Path to the array in the last response, or a variable name holding a JSON array | see below |
 | Item variable prefix | Prefix for injected variables | `item` |
 
-Each item's fields are injected as `{{item_fieldName}}` (e.g. `{{item_itemUuid}}`). The full item JSON is available as `{{item}}`.
+#### Array source expressions
+
+| Expression | When to use |
+|-----------|-------------|
+| `body` | The response body **is** the array (e.g. `[ {...}, {...} ]`) |
+| `body.items` | The array is at `response.body.items` |
+| `body.data.userId` | Nested path |
+| `items` | A variable mapped from a previous edge containing a JSON array |
+
+#### Item variables
+
+For each object in the array, two kinds of variables are injected with the configured prefix (e.g. `item`):
+
+| Variable | Value |
+|----------|-------|
+| `{{item}}` | Full item as a JSON string |
+| `{{item.fieldName}}` | Field value using **dot notation** (e.g. `{{item.userId}}`) |
+| `{{item_fieldName}}` | Same value using **underscore notation** (e.g. `{{item_userId}}`) — both work |
+
+Both notations are valid in request URLs, headers, auth fields, and bodies.
+
+Inside **condition scripts** and **debug scripts**, the variables object is pre-parsed, so you can also use direct JavaScript dot access:
+```javascript
+console.log(variables.item.userId);   // works — item is a parsed object
+console.log(variables.item_userId);    // also works — flat string value
+```
 
 ### For Each handles
 
@@ -225,7 +281,7 @@ Connect **body** to the per-item request node(s), and **done** to wherever the f
 
 ## Saving and Reverting
 
-- Click **Save** or blur the runner name to persist all changes.
+- Click **Save** to persist all changes. To rename a runner, use the **···** menu on the runner item in the sidebar.
 - Click **Revert** to discard any unsaved changes and restore the last saved version. A confirmation is shown before reverting.
 - Runner state (nodes, edges, positions, conditions, mappings, outputs) is stored in `{workspace}/runners/` and committed to git.
 
