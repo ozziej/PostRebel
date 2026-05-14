@@ -13,7 +13,7 @@ A local API testing tool with git support - your Postman alternative.
 - Variable templating with `{{variable}}` syntax
 - Pre-request and test scripts with Postman-compatible `pm` object
 - Local file storage with git support
-- Environment management with variable editor
+- **Environment management** — create, rename, duplicate (📋), and delete environments; edit variables with sort (↕) and bulk-edit; side-by-side diff between any two environments with one-click copy of values from left to right
 - Token extraction from responses
 - **Certificate management** - Import custom CA certificates for internal APIs
 - **Postman V2 collection and environment import**
@@ -23,7 +23,7 @@ A local API testing tool with git support - your Postman alternative.
 - **Response syntax highlighting** - JSON and XML responses are colour-coded with distinct colours for keys, string values, numbers, booleans, tag names, and attributes
 - **Drag and drop** - Reorder requests and folders in the sidebar by dragging; drag requests between folders to move them
 - **Workspace management** - Organize projects into separate workspaces with a shared git repo at the workspaces root directory
-- **Secrets management** - Mark variables and form parameters as secret; secrets are automatically split into `.secrets.json` files and gitignored
+- **Secrets management** - Mark variables and form parameters as secret; secrets are automatically split into `.secrets.json` files and gitignored; secret variable values are masked as `••••••••` in runner execution logs and CSV exports
 - **Request history** - Per-request execution log showing status, timing, and size; persisted per workspace and auto-pruned to a configurable maximum
 - **Saved responses** - Snapshot and name any response for future reference; saved responses are listed under their parent request in the sidebar
 - **Collection folders** - Group requests inside a collection; add folders manually or have them created automatically on OpenAPI import (one folder per tag); drag and drop to reorder and move requests between folders

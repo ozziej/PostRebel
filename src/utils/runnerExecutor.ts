@@ -5,6 +5,11 @@ import {
 import { HttpService } from './httpService';
 import { ScriptRunner } from './scriptRunner';
 
+/** Returns '••••••••' for known secret variable names, otherwise the original value. */
+function maskSecret(varName: string, value: string, secretNames: Set<string>): string {
+  return secretNames.has(varName) ? '••••••••' : value;
+}
+
 // ── Path walking (shared by extractValue + extractArray) ──────────────────────
 
 function walkPath(data: any, segments: string[]): any {
@@ -261,6 +266,7 @@ interface SeqCtx {
   onEdgeFollowed?: (edgeId: string) => void;
   onLog?: (entry: RunnerLogEntry) => void;
   signal?: AbortSignal;
+  secretVarNames: Set<string>;
 }
 
 // ── Core sequence runner (called recursively for forEach bodies) ──────────────
@@ -457,7 +463,8 @@ async function runSequence(
           const varName = m.toVariable.trim().replace(/^\{\{/, '').replace(/\}\}$/, '');
           const val = newVars[varName];
           if (varName && val !== undefined && val !== '') {
-            const display = val.length > 60 ? val.slice(0, 60) + '…' : val;
+            const masked = maskSecret(varName, val, ctx.secretVarNames);
+            const display = masked.length > 60 ? masked.slice(0, 60) + '…' : masked;
             ctx.onLog?.({ level: 'info', message: `↦ ${m.fromExpression} → {{${varName}}} = "${display}"` });
           }
         }
@@ -597,7 +604,8 @@ async function runSequence(
             value = expression.replace(/\{\{([\w.]+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
           }
           vars[variable.trim()] = value;
-          const display = value.length > 60 ? value.slice(0, 60) + '…' : value;
+          const masked = maskSecret(variable.trim(), value, ctx.secretVarNames);
+          const display = masked.length > 60 ? masked.slice(0, 60) + '…' : masked;
           ctx.onLog?.({ level: 'info', message: `x= ${variable.trim()} = "${display}"` });
         } catch (err: any) {
           ctx.onLog?.({ level: 'warn', message: `x= Error setting ${variable}: ${err.message}` });
@@ -651,6 +659,12 @@ export async function executeRunner(
   const startNode = runner.nodes.find(n => n.type === 'start');
   if (!startNode) return;
 
+  const secretVarNames = new Set<string>(
+    (environment?.variablesArray || [])
+      .filter(v => v.isSecret)
+      .map(v => v.key)
+  );
+
   let localVars: Record<string, string> = environment ? { ...environment.variables } : {};
   for (const { key, value } of (startNode.data.variables ?? [])) {
     if (key.trim()) localVars[key.trim()] = value;
@@ -668,6 +682,7 @@ export async function executeRunner(
   const ctx: SeqCtx = {
     runner, collection, environment, certificates,
     outgoingEdges, onNodeStatusChange, onEdgeFollowed, onLog, signal,
+    secretVarNames,
   };
 
   await runSequence(startEdge.target, localVars, null, ctx);

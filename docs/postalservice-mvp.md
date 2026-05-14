@@ -20,7 +20,10 @@ Original motivation: Postman changed their licensing, making existing collection
 
 - [x] Workspace management with shared git repo at workspaces root
 - [x] Certificate management for internal/self-signed HTTPS APIs
-- [x] Secrets management with visual indicators and automatic split/merge
+- [x] Secrets management with visual indicators and automatic split/merge; secret values masked in runner logs and CSV exports
+- [x] Environment diff — side-by-side variable comparison between any two environments; one-click copy of values from left to right with pending-change preview and save
+- [x] Environment duplicate — 📋 button clones an environment with all variables intact
+- [x] Variable sort — ↕ Sort toggle in the variable editor cycles A→Z / Z→A / off
 - [x] Per-request execution history with configurable retention
 - [x] JSON body linting
 - [x] Variable autocomplete

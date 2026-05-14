@@ -9,6 +9,7 @@ import { ResponsePanel } from './components/ResponsePanel';
 import { CertificateManager } from './components/CertificateManager';
 import { EnvironmentEditor } from './components/EnvironmentEditor';
 import { EnvironmentManager } from './components/EnvironmentManager';
+import { EnvironmentDiff } from './components/EnvironmentDiff';
 import { WorkspaceManager } from './components/WorkspaceManager';
 import { SettingsModal } from './components/SettingsModal';
 import { ImportModal, ImportTab } from './components/ImportModal';
@@ -34,6 +35,8 @@ function App() {
   const [showCertManager, setShowCertManager] = useState(false);
   const [showEnvEditor, setShowEnvEditor] = useState(false);
   const [showEnvManager, setShowEnvManager] = useState(false);
+  const [showEnvDiff, setShowEnvDiff] = useState(false);
+  const [envDiffSource, setEnvDiffSource] = useState<Environment | null>(null);
   const [showWorkspaceManager, setShowWorkspaceManager] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -415,6 +418,20 @@ function App() {
     console.log('[App] Updated environment:', updatedEnvironment.name);
   };
 
+  const handleDuplicateEnvironment = async (environment: Environment) => {
+    const duplicated: Environment = {
+      ...environment,
+      id: Date.now().toString(),
+      name: `${environment.name} (copy)`,
+    };
+    await saveEnvironment(duplicated);
+  };
+
+  const handleCompareEnvironment = (environment: Environment) => {
+    setEnvDiffSource(environment);
+    setShowEnvDiff(true);
+  };
+
   const handleDeleteEnvironment = async (environmentId: string) => {
     await deleteEnvironment(environmentId);
   };
@@ -422,7 +439,6 @@ function App() {
   const handleEditEnvironmentVariables = (environment: Environment) => {
     setActiveEnvironment(environment);
     setShowEnvEditor(true);
-    setShowEnvManager(false);
   };
 
   const handleSelectEnvironment = useCallback((env: Environment) => {
@@ -929,13 +945,6 @@ function App() {
         onCertificatesChange={setCertificates}
       />
 
-      <EnvironmentEditor
-        isOpen={showEnvEditor}
-        environment={activeEnvironment}
-        onClose={() => setShowEnvEditor(false)}
-        onSave={saveEnvironment}
-      />
-
       <EnvironmentManager
         isOpen={showEnvManager}
         environments={environments}
@@ -947,7 +956,25 @@ function App() {
         onSelectEnvironment={handleSelectEnvironment}
         onEditVariables={handleEditEnvironmentVariables}
         onOpenImport={() => openImportModal('environment')}
+        onDuplicateEnvironment={handleDuplicateEnvironment}
+        onCompareEnvironment={handleCompareEnvironment}
       />
+
+      <EnvironmentEditor
+        isOpen={showEnvEditor}
+        environment={activeEnvironment}
+        onClose={() => setShowEnvEditor(false)}
+        onSave={saveEnvironment}
+      />
+
+      {showEnvDiff && (
+        <EnvironmentDiff
+          environments={environments}
+          initialEnvA={envDiffSource}
+          onClose={() => { setShowEnvDiff(false); setEnvDiffSource(null); }}
+          onSaveEnvironment={saveEnvironment}
+        />
+      )}
 
       <WorkspaceManager
         isOpen={showWorkspaceManager}

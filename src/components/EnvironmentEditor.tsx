@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Environment, EnvironmentVariable, KeyValuePair } from '../types';
 import { KeyValueEditor } from './KeyValueEditor';
 
@@ -18,6 +18,14 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
   const [variablesData, setVariablesData] = useState<KeyValuePair[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [currentEnv, setCurrentEnv] = useState<Environment | null>(null);
+  const [toast, setToast] = useState('');
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const triggerToast = useCallback((msg: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(msg);
+    toastTimerRef.current = setTimeout(() => setToast(''), 2000);
+  }, []);
 
   useEffect(() => {
     if (isOpen && environment) {
@@ -76,7 +84,8 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
 
       console.log('[EnvironmentEditor] Saving environment:', updatedEnv);
       await onSave(updatedEnv);
-      onClose();
+      triggerToast('Changes Saved');
+      setTimeout(() => onClose(), 1200);
     } catch (error) {
       console.error('Failed to save environment:', error);
       alert('Failed to save environment');
@@ -139,6 +148,7 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
 
         <div style={{ marginBottom: '1.5rem' }}>
           <KeyValueEditor
+            allowSort={true}
             data={variablesData}
             onChange={handleVariablesChange}
             placeholder={{ key: 'Variable name (e.g., api_key)', value: 'Variable value' }}
@@ -207,6 +217,28 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
           </div>
         </div>
       </div>
+
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          bottom: '1.5rem',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#166534',
+          border: '1px solid #22c55e',
+          color: '#fff',
+          padding: '0.35rem 1rem',
+          borderRadius: 20,
+          fontSize: '0.8rem',
+          fontWeight: 500,
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+          zIndex: 1100,
+        }}>
+          ✓ {toast}
+        </div>
+      )}
     </div>
   );
 };

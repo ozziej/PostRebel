@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Environment } from '../types';
 
 interface EnvironmentManagerProps {
@@ -12,6 +12,8 @@ interface EnvironmentManagerProps {
   onSelectEnvironment: (environment: Environment) => void;
   onEditVariables: (environment: Environment) => void;
   onOpenImport?: () => void;
+  onDuplicateEnvironment?: (environment: Environment) => void;
+  onCompareEnvironment?: (environment: Environment) => void;
 }
 
 export const EnvironmentManager: React.FC<EnvironmentManagerProps> = ({
@@ -24,13 +26,23 @@ export const EnvironmentManager: React.FC<EnvironmentManagerProps> = ({
   onDeleteEnvironment,
   onSelectEnvironment,
   onEditVariables,
-  onOpenImport
+  onOpenImport,
+  onDuplicateEnvironment,
+  onCompareEnvironment
 }) => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingEnvironment, setEditingEnvironment] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [toast, setToast] = useState('');
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const triggerToast = useCallback((msg: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(msg);
+    toastTimerRef.current = setTimeout(() => setToast(''), 2000);
+  }, []);
 
   if (!isOpen) return null;
 
@@ -382,6 +394,31 @@ export const EnvironmentManager: React.FC<EnvironmentManagerProps> = ({
                       >
                         🗑️
                       </button>
+                      {onDuplicateEnvironment && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await onDuplicateEnvironment(environment);
+                            triggerToast(`${environment.name} Copied`);
+                          }}
+                          className="button-secondary button"
+                          title="Duplicate environment"
+                        >
+                          📋
+                        </button>
+                      )}
+                      {onCompareEnvironment && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onCompareEnvironment(environment);
+                          }}
+                          className="button-secondary button"
+                          title="Compare with another environment"
+                        >
+                          ⇄
+                        </button>
+                      )}
                     </div>
                   </div>
                 )
@@ -411,6 +448,28 @@ export const EnvironmentManager: React.FC<EnvironmentManagerProps> = ({
           </div>
         </div>
       </div>
+
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          bottom: '1.5rem',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#166534',
+          border: '1px solid #22c55e',
+          color: '#fff',
+          padding: '0.35rem 1rem',
+          borderRadius: 20,
+          fontSize: '0.8rem',
+          fontWeight: 500,
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+          zIndex: 1100,
+        }}>
+          ✓ {toast}
+        </div>
+      )}
     </div>
   );
 };

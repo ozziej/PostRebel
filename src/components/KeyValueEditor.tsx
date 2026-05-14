@@ -9,6 +9,7 @@ interface KeyValueEditorProps {
   environment?: Environment | null;
   onUpdateVariable?: (varName: string, newValue: string) => void;
   allowSecrets?: boolean; // Show secret checkbox
+  allowSort?: boolean;   // Show sort toggle button
 }
 
 export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
@@ -17,10 +18,12 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
   placeholder = { key: 'Key', value: 'Value' },
   environment,
   onUpdateVariable,
-  allowSecrets = false
+  allowSecrets = false,
+  allowSort = false,
 }) => {
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkText, setBulkText] = useState('');
+  const [sortOrder, setSortOrder] = useState<'none' | 'asc' | 'desc'>('none');
 
   useEffect(() => {
     if (bulkMode) {
@@ -55,6 +58,19 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
 
   const addRow = () => {
     onChange([...data, { key: '', value: '', enabled: true, isSecret: false }]);
+  };
+
+  const handleSortToggle = () => {
+    const next = sortOrder === 'none' ? 'asc' : sortOrder === 'asc' ? 'desc' : 'none';
+    setSortOrder(next);
+    if (next !== 'none') {
+      const filled = data.filter(v => v.key.trim() !== '');
+      const empty = data.filter(v => v.key.trim() === '');
+      const sorted = [...filled].sort((a, b) =>
+        next === 'asc' ? a.key.localeCompare(b.key) : b.key.localeCompare(a.key)
+      );
+      onChange([...sorted, ...empty]);
+    }
   };
 
   const updateRow = (index: number, field: 'key' | 'value' | 'enabled' | 'isSecret', value: string | boolean) => {
@@ -103,10 +119,27 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-        <button onClick={addRow} className="button" style={{ fontSize: '0.8rem' }}>
-          + Add Parameter
-        </button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button onClick={addRow} className="button" style={{ fontSize: '0.8rem' }}>
+            + Add Parameter
+          </button>
+          {allowSort && (
+            <button
+              onClick={handleSortToggle}
+              className="button-secondary button"
+              title={sortOrder === 'none' ? 'Sort A → Z' : sortOrder === 'asc' ? 'Sort Z → A' : 'Clear sort'}
+              style={{
+                fontSize: '0.78rem',
+                padding: '0.3rem 0.6rem',
+                background: sortOrder !== 'none' ? '#0d7377' : undefined,
+                color: sortOrder !== 'none' ? '#fff' : undefined,
+              }}
+            >
+              {sortOrder === 'asc' ? 'A→Z ▲' : sortOrder === 'desc' ? 'Z→A ▼' : '↕ Sort'}
+            </button>
+          )}
+        </div>
         <button
           onClick={() => setBulkMode(true)}
           className="button-secondary button"
