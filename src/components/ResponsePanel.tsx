@@ -13,6 +13,7 @@ interface ResponsePanelProps {
   searchOptions?: SearchOptions;
   activeMatchIndex?: number;
   onMatchCountChange?: (count: number) => void;
+  testResults?: Array<{ name: string; passed: boolean; error?: string }>;
 }
 
 export const ResponsePanel: React.FC<ResponsePanelProps> = ({
@@ -25,8 +26,9 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
   searchOptions = { caseSensitive: false, wholeWords: false, useRegex: false },
   activeMatchIndex = -1,
   onMatchCountChange,
+  testResults = [],
 }) => {
-  const [activeTab, setActiveTab] = useState<'response' | 'headers' | 'console'>('response');
+  const [activeTab, setActiveTab] = useState<'response' | 'headers' | 'console' | 'tests'>('response');
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [saveInputName, setSaveInputName] = useState('');
   const [imageDataUrl, setImageDataUrl] = useState<string>('');
@@ -698,6 +700,18 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
           >
             Console {logs.length > 0 && <span style={{ background: '#0d7377', borderRadius: '10px', padding: '0.2rem 0.5rem', fontSize: '0.7rem', marginLeft: '0.5rem' }}>{logs.length}</span>}
           </button>
+          <button
+            className={`tab ${activeTab === 'tests' ? 'active' : ''}`}
+            onClick={() => setActiveTab('tests')}
+          >
+            Tests {testResults.length > 0 && (() => {
+              const failures = testResults.filter(t => !t.passed).length;
+              if (failures > 0) {
+                return <span style={{ background: '#ef4444', borderRadius: '10px', padding: '0.2rem 0.5rem', fontSize: '0.7rem', marginLeft: '0.5rem', color: '#fff' }}>{failures} failed</span>;
+              }
+              return <span style={{ background: '#22c55e', borderRadius: '10px', padding: '0.2rem 0.5rem', fontSize: '0.7rem', marginLeft: '0.5rem', color: '#fff' }}>✓</span>;
+            })()}
+          </button>
         </div>
       </div>
 
@@ -815,6 +829,52 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
                   {renderHighlightedText(log, tabMatchData.offsets[index] ?? 0)}
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {activeTab === 'tests' && (
+          <div style={{ padding: '1rem' }}>
+            {testResults.length === 0 ? (
+              <div style={{ color: '#666', textAlign: 'center', padding: '2rem', fontSize: '0.9rem' }}>
+                No test results — add pm.test() calls to the test script
+              </div>
+            ) : (
+              <>
+                <div style={{ marginBottom: '1rem', color: '#aaa', fontSize: '0.85rem' }}>
+                  {testResults.every(t => t.passed)
+                    ? `All ${testResults.length} passed`
+                    : `${testResults.filter(t => t.passed).length} / ${testResults.length} passed`}
+                </div>
+                {testResults.map((result, index) => (
+                  <div key={index} style={{ marginBottom: '0.5rem' }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      color: result.passed ? '#22c55e' : '#ef4444',
+                      fontSize: '0.875rem',
+                    }}>
+                      <span>{result.passed ? '✓' : '✗'}</span>
+                      <span>{result.name}</span>
+                    </div>
+                    {!result.passed && result.error && (
+                      <div style={{
+                        marginLeft: '1.5rem',
+                        marginTop: '0.25rem',
+                        color: '#f87171',
+                        fontSize: '0.8rem',
+                        fontFamily: 'monospace',
+                        backgroundColor: '#2d1a1a',
+                        padding: '0.4rem 0.6rem',
+                        borderRadius: '3px',
+                      }}>
+                        {result.error}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
             )}
           </div>
         )}

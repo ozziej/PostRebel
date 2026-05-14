@@ -5,6 +5,7 @@ import { VariableInput } from './VariableInput';
 import { SearchOptions } from './SearchBar';
 import { findMatches, highlightText } from '../utils/searchHighlight';
 import { RunnerCanvas } from './RunnerCanvas';
+import { generateCurl, generateFetch, generatePython } from '../utils/codeGenerator';
 import jsonlint from 'jsonlint-mod';
 
 function formatRelativeTime(isoDate: string): string {
@@ -78,6 +79,8 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   const [localRequest, setLocalRequest] = useState<ApiRequest | null>(null);
   const [jsonValidation, setJsonValidation] = useState<{ valid: boolean; message: string } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showCodeGen, setShowCodeGen] = useState(false);
+  const [codeTab, setCodeTab] = useState<'curl' | 'fetch' | 'python'>('curl');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -244,6 +247,14 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
         >
           History
         </button>
+        <button
+          className={`button ${showCodeGen ? '' : 'button-secondary'}`}
+          onClick={() => setShowCodeGen(!showCodeGen)}
+          title="Generate code snippet"
+          style={{ padding: '0.5rem 0.75rem', whiteSpace: 'nowrap' }}
+        >
+          &lt;/&gt; Code
+        </button>
       </div>
 
       {showHistory && (() => {
@@ -323,6 +334,74 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
           </div>
         );
       })()}
+
+      {showCodeGen && localRequest && (
+        <div style={{
+          backgroundColor: '#1a1a1a',
+          border: '1px solid #404040',
+          borderRadius: '4px',
+          marginBottom: '0.5rem',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid #333', padding: '0.25rem 0.5rem', gap: '0.25rem' }}>
+            {(['curl', 'fetch', 'python'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setCodeTab(tab)}
+                style={{
+                  background: codeTab === tab ? '#0d7377' : 'transparent',
+                  color: codeTab === tab ? '#fff' : '#aaa',
+                  border: 'none',
+                  borderRadius: '4px',
+                  padding: '0.25rem 0.6rem',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                }}
+              >
+                {tab === 'curl' ? 'cURL' : tab === 'fetch' ? 'fetch' : 'Python'}
+              </button>
+            ))}
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <button
+                onClick={() => {
+                  const code = codeTab === 'curl'
+                    ? generateCurl(localRequest, environment, activeCollection)
+                    : codeTab === 'fetch'
+                    ? generateFetch(localRequest, environment, activeCollection)
+                    : generatePython(localRequest, environment, activeCollection);
+                  navigator.clipboard.writeText(code).catch(() => {});
+                }}
+                style={{ background: 'transparent', color: '#0d9e9e', border: '1px solid #0d7377', borderRadius: '4px', padding: '0.2rem 0.5rem', cursor: 'pointer', fontSize: '0.75rem' }}
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => setShowCodeGen(false)}
+                style={{ background: 'transparent', color: '#888', border: 'none', cursor: 'pointer', fontSize: '1rem', lineHeight: 1, padding: '0.2rem 0.3rem' }}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <pre style={{
+            backgroundColor: '#0a0a0a',
+            margin: 0,
+            padding: '1rem',
+            overflowX: 'auto',
+            fontSize: '0.8rem',
+            fontFamily: 'monospace',
+            color: '#e0e0e0',
+            maxHeight: '300px',
+            overflowY: 'auto',
+            borderRadius: '0 0 4px 4px',
+          }}>
+            {codeTab === 'curl'
+              ? generateCurl(localRequest, environment, activeCollection)
+              : codeTab === 'fetch'
+              ? generateFetch(localRequest, environment, activeCollection)
+              : generatePython(localRequest, environment, activeCollection)}
+          </pre>
+        </div>
+      )}
 
       <div className="request-tabs">
         <button

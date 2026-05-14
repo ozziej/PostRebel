@@ -30,6 +30,7 @@ function App() {
   const [responseCache, setResponseCache] = useState<Record<string, ApiResponse>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
+  const [testResults, setTestResults] = useState<Array<{ name: string; passed: boolean; error?: string }>>([]);
   const [showCertManager, setShowCertManager] = useState(false);
   const [showEnvEditor, setShowEnvEditor] = useState(false);
   const [showEnvManager, setShowEnvManager] = useState(false);
@@ -689,6 +690,7 @@ function App() {
     setIsLoading(true);
     setCurrentResponse(null);
     setLogs([]);
+    setTestResults([]);
 
     try {
       // Execute pre-request script
@@ -745,6 +747,8 @@ function App() {
         if (!testScriptResult.success) {
           setLogs(prev => [...prev, `Test script error: ${testScriptResult.error}`]);
         }
+
+        setTestResults(testScriptResult.testResults || []);
       }
 
       setLogs(prev => [...prev, `Request completed in ${response.time}ms`]);
@@ -913,6 +917,7 @@ function App() {
             searchOptions={searchOptions}
             activeMatchIndex={activeMatchIndex}
             onMatchCountChange={setTotalMatchCount}
+            testResults={testResults}
           />
         )}
         </div>
