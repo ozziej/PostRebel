@@ -147,6 +147,7 @@ export interface RunnerNode {
 export interface RunnerLogEntry {
   level: 'info' | 'success' | 'warn' | 'error' | 'script';
   message: string;
+  timestamp?: number; // ms since epoch — injected by the UI when the entry is received
 }
 
 export interface Runner {

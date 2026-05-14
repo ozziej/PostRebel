@@ -412,6 +412,8 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
   );
   const runnerRef = useRef(runner);
   const rfInstanceRef = useRef<any>(null);
+  const runStartRef = useRef<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Returns the centre of the currently visible canvas in flow coordinates
   const getCanvasCenter = useCallback((): { x: number; y: number } => {
@@ -715,6 +717,8 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setFollowedEdgeIds(new Set());
     setRunnerLogs([]);
     setShowLog(true);
+    runStartRef.current = Date.now();
+    abortControllerRef.current = new AbortController();
     // Reset edges to pre-run styling
     setEdges(toFlowEdges(runnerRef.current.edges, new Set(), false));
 
@@ -734,13 +738,44 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
           setFollowedEdgeIds(prev => new Set([...prev, edgeId]));
         },
         (entry) => {
-          setRunnerLogs(prev => [...prev, entry]);
+          setRunnerLogs(prev => [...prev, { ...entry, timestamp: Date.now() }]);
         },
+        abortControllerRef.current?.signal,
       );
     } finally {
       setIsRunning(false);
     }
   }, [isRunning, buildRunnerFromFlow, collection, activeEnvironment, certificates, toFlowEdges]);
+
+  const handleStop = useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
+
+  const handleExportLog = useCallback(() => {
+    if (runnerLogs.length === 0) return;
+    const escape = (v: string) => {
+      if (v.includes('"') || v.includes(',') || v.includes('\n')) {
+        return `"${v.replace(/"/g, '""')}"`;
+      }
+      return v;
+    };
+    const startMs = runStartRef.current;
+    const rows = [
+      'elapsed_s,level,message',
+      ...runnerLogs.map(e => {
+        const elapsed = e.timestamp != null ? ((e.timestamp - startMs) / 1000).toFixed(3) : '';
+        return `${elapsed},${escape(e.level)},${escape(e.message)}`;
+      }),
+    ];
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.download = `${runnerRef.current.name}-log-${ts}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [runnerLogs]);
 
   const handleExport = useCallback(() => {
     const data = JSON.stringify(buildRunnerFromFlow(), null, 2);
@@ -867,6 +902,16 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         >
           {isRunning ? 'Running…' : '▶ Run'}
         </button>
+
+        {isRunning && (
+          <button
+            className="button"
+            onClick={handleStop}
+            style={{ background: '#7f1d1d', borderColor: '#ef4444', color: '#fff' }}
+          >
+            ⏹ Stop
+          </button>
+        )}
 
         <div style={{ position: 'relative' }}>
           <button
@@ -1101,8 +1146,16 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
             </span>
             <span style={{ fontSize: '0.7rem', color: '#333' }}>{runnerLogs.length} entries</span>
             <button
+              onClick={handleExportLog}
+              disabled={runnerLogs.length === 0}
+              title="Download log as CSV"
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: runnerLogs.length === 0 ? '#2a2a2a' : '#444', cursor: runnerLogs.length === 0 ? 'default' : 'pointer', fontSize: '0.72rem' }}
+            >
+              Download
+            </button>
+            <button
               onClick={() => setRunnerLogs([])}
-              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#444', cursor: 'pointer', fontSize: '0.72rem' }}
+              style={{ background: 'none', border: 'none', color: '#444', cursor: 'pointer', fontSize: '0.72rem' }}
             >
               Clear
             </button>
@@ -1126,6 +1179,9 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
                 error:   '#f87171',
                 script:  '#0d9e9e',
               };
+              const elapsed = entry.timestamp != null
+                ? ((entry.timestamp - runStartRef.current) / 1000).toFixed(3)
+                : null;
               return (
                 <div key={i} style={{
                   padding: '0.15rem 0.75rem',
@@ -1134,8 +1190,14 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
                   color: colors[entry.level],
                   lineHeight: 1.5,
                   borderBottom: '1px solid #111',
+                  display: 'flex', gap: 8,
                 }}>
-                  {entry.message}
+                  {elapsed != null && (
+                    <span style={{ color: '#3a3a3a', flexShrink: 0, userSelect: 'none' }}>
+                      +{elapsed}s
+                    </span>
+                  )}
+                  <span>{entry.message}</span>
                 </div>
               );
             })}

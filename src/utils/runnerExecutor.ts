@@ -259,6 +259,7 @@ interface SeqCtx {
   onNodeStatusChange: (nodeId: string, result: RunnerNodeResult) => void;
   onEdgeFollowed?: (edgeId: string) => void;
   onLog?: (entry: RunnerLogEntry) => void;
+  signal?: AbortSignal;
 }
 
 // ── Core sequence runner (called recursively for forEach bodies) ──────────────
@@ -274,13 +275,18 @@ async function runSequence(
   let currentNodeId: string | undefined = startNodeId;
 
   while (currentNodeId) {
+    if (ctx.signal?.aborted) {
+      ctx.onLog?.({ level: 'warn', message: '⏹ Run stopped by user' });
+      break;
+    }
+
     const node = ctx.runner.nodes.find(n => n.id === currentNodeId);
     if (!node) break;
 
     // ── End ──────────────────────────────────────────────────────────────────
     if (node.type === 'end') {
       ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
-      await pause(100);
+      await pause(100, ctx.signal);
       ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'success' });
       ctx.onLog?.({ level: 'success', message: 'Runner completed' });
       break;
@@ -291,7 +297,7 @@ async function runSequence(
       const ms = (node.data.delayMs as number | undefined) ?? 1000;
       ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
       ctx.onLog?.({ level: 'info', message: `⏱ Waiting ${ms}ms…` });
-      await pause(ms);
+      await pause(ms, ctx.signal);
       ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'success' });
       const nextEdge = ctx.outgoingEdges[node.id]?.[0];
       if (!nextEdge) break;
@@ -332,6 +338,7 @@ async function runSequence(
       const doneEdge = allEdges.find(e => e.sourceHandle === 'done');
 
       for (let i = 0; i < array.length; i++) {
+        if (ctx.signal?.aborted) break;
         ctx.onLog?.({ level: 'info', message: `↻ Item ${i + 1} / ${array.length}` });
         const itemVars = injectItemVars(array[i], itemVar, vars);
         if (bodyEdge) {
@@ -473,6 +480,7 @@ export async function executeRunner(
   onNodeStatusChange: (nodeId: string, result: RunnerNodeResult) => void,
   onEdgeFollowed?: (edgeId: string) => void,
   onLog?: (entry: RunnerLogEntry) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   // Build outgoing edge map; conditional edges sorted first (unconditional = else fallback)
   const outgoingEdges: Record<string, RunnerEdge[]> = {};
@@ -499,7 +507,7 @@ export async function executeRunner(
   }
 
   onNodeStatusChange(startNode.id, { nodeId: startNode.id, status: 'running' });
-  await pause(100);
+  await pause(100, signal);
   onNodeStatusChange(startNode.id, { nodeId: startNode.id, status: 'success' });
   onLog?.({ level: 'info', message: '▶ Runner started' });
 
@@ -509,12 +517,15 @@ export async function executeRunner(
 
   const ctx: SeqCtx = {
     runner, collection, environment, certificates,
-    outgoingEdges, onNodeStatusChange, onEdgeFollowed, onLog,
+    outgoingEdges, onNodeStatusChange, onEdgeFollowed, onLog, signal,
   };
 
   await runSequence(startEdge.target, localVars, null, ctx);
 }
 
-function pause(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    const id = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => { clearTimeout(id); resolve(); }, { once: true });
+  });
 }
