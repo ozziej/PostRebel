@@ -28,6 +28,7 @@ The canvas fills the full panel area when a runner is active. It contains:
 |--------|---------|
 | Runner name | Display only — rename via the sidebar **···** menu |
 | **▶ Run** | Execute the flow |
+| **⏹ Stop** | Abort a run in progress — appears next to **Running…** while executing |
 | **+ Add Request** | Searchable dropdown — pick any request from the collection |
 | **+ Nodes ▾** | Dropdown to add a **Debug Script**, **Delay**, or **For Each** node |
 | **Save** | Persist current state to disk |
@@ -69,6 +70,10 @@ Click **▶ Run** in the toolbar. Each node updates in real time:
 
 The run follows the connected path from Start to End (or until no matching edge is found).
 
+### Stopping a run
+
+Click **⏹ Stop** (red button, visible while running) to abort immediately. The runner stops at the next node boundary — any in-flight HTTP request for the current node completes first, then execution halts. A `⏹ Run stopped by user` entry appears in the execution log.
+
 ## Viewing Node Requests and Responses
 
 Click any completed node (success **or** failure) to open the inline panel on the right. The panel is split into two sections separated by a labelled divider:
@@ -93,11 +98,13 @@ The execution log panel opens automatically when you click **▶ Run**. It recor
 | Green | Success — node completed, condition followed, output value |
 | Amber | Warn — 4xx response |
 | Red | Error — node failed, condition script error |
-| Teal | Script — `console.log()` output from condition scripts |
+| Teal | Script — `console.log()` and `pm.test()` output from pre-request scripts, test scripts, condition scripts, and debug nodes |
 
-You can also call `console.log(...)` inside any condition script and the output appears in the log.
+Each entry is prefixed with an elapsed time (e.g. `+0.387s`) measured from when **▶ Run** was clicked, making it easy to identify slow nodes.
 
-Click **Clear** to empty the log, or **✕** to collapse the panel. The **Log** toolbar button shows a badge with the entry count.
+You can call `console.log(...)` inside any script or condition and the output appears in the log as a teal entry.
+
+Click **Download** to save the current log as a CSV file (`elapsed_s`, `level`, `message` columns). Click **Clear** to empty the log, or **✕** to collapse the panel. The **Log** toolbar button shows a badge with the entry count.
 
 ## Start Node — Variable Overrides
 
@@ -109,6 +116,45 @@ Click the **Start** node to set variable overrides that apply for the duration o
 - Inject a known/expired token to test auth failure paths
 
 When overrides are set, the Start node displays a purple badge showing the count.
+
+## Request Scripts in the Runner
+
+If a request in your collection has a **pre-request script** or **test script** configured (in the Scripts tab of the request panel), the runner executes them automatically — no extra configuration needed.
+
+### Execution order for each Request node
+
+1. **Pre-request script** runs first. Any `pm.environment.set()` calls update the variable state before the HTTP request is built, so substituted URLs, headers, and bodies see the new values.
+2. **HTTP request** executes with the updated variables.
+3. **Test script** runs against the response. Any `pm.environment.set()` calls are immediately available to all subsequent nodes in the flow.
+
+### Script output in the log
+
+All `console.log()`, `console.warn()`, and `console.error()` calls appear as teal entries in the execution log. `pm.test()` pass/fail results are also shown:
+
+```
+✓ Status is 200
+✗ Token present: Expected undefined to equal string
+```
+
+### Using test scripts to pass data downstream
+
+A test script that sets a variable is the simplest way to chain authenticated requests:
+
+```javascript
+// Test script on "Get Token" request node
+if (pm.response.to.have.status(200)) {
+    const data = pm.response.json();
+    pm.environment.set("access_token", data.access_token);
+}
+```
+
+After this node completes, `{{access_token}}` is available in every downstream node's URL, headers, auth fields, and body — without needing an edge mapping.
+
+> **Note:** Edge mappings and test scripts can coexist. Use whichever fits your flow — test scripts are better when the extraction logic already exists in the request definition; edge mappings are better for one-off extractions specific to the runner flow.
+
+### Legacy `responseBody` variable
+
+Scripts that reference `responseBody` (a legacy Postman variable removed in Postman v2) will display a warning in the execution log and the variable will be `undefined`. Replace it with `pm.response.text()` or `pm.response.json()`.
 
 ## Passing Data Between Requests (Mappings)
 
@@ -292,20 +338,36 @@ Connect **body** to the per-item request node(s), and **done** to wherever the f
 
 ## Typical Auth Flow Example
 
-1. Add three requests to your collection: `Login`, `Get Profile`, `Handle Error`.
-2. Create a runner and add all three as nodes.
-3. Connect: `Start → Login → [branch]`
-4. On the edge `Login → Get Profile`:
-   - **Condition**: `return status === 200;`
-   - **Mappings**: `body.access_token` → `access_token`
-   - **Output**: `body.description`
-5. On the edge `Login → Handle Error`:
-   - Condition: leave blank (the *else* path)
-6. Connect both branches to `End`.
-7. On `Get Profile`, set Auth → Bearer Token: `{{access_token}}`
-8. Click **▶ Run**
+### Using a test script (recommended)
 
-After running, check the execution log for the output value, then click any node to inspect its full request and response.
+1. Add three requests to your collection: `Login`, `Get Profile`, `Handle Error`.
+2. On the `Login` request, add a **test script**:
+   ```javascript
+   if (pm.response.to.have.status(200)) {
+       pm.environment.set("access_token", pm.response.json().access_token);
+   }
+   ```
+3. On `Get Profile`, set Auth → Bearer Token: `{{access_token}}`.
+4. Create a runner and add all three as nodes.
+5. Connect: `Start → Login → [branch]`
+6. On the edge `Login → Get Profile`: add a **Condition** `return status === 200;`
+7. On the edge `Login → Handle Error`: leave condition blank (the *else* path).
+8. Connect both branches to `End`.
+9. Click **▶ Run**.
+
+When `Login` succeeds, the test script sets `access_token` automatically. `Get Profile` picks it up from `{{access_token}}` without any edge mapping required.
+
+### Using an edge mapping (alternative)
+
+If you prefer to keep the extraction in the runner rather than the request definition, skip the test script and instead configure the `Login → Get Profile` edge:
+
+- **Condition**: `return status === 200;`
+- **Data Mappings**: `body.access_token` → `access_token`
+- **Output**: `body.description`
+
+Both approaches produce the same result — choose whichever fits your workflow.
+
+After running, check the execution log for script output and mapped values, then click any node to inspect its full request and response.
 
 ## Storage
 

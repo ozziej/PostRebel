@@ -1,4 +1,4 @@
-import { ApiResponse, Environment, ScriptContext } from '../types';
+import { ApiResponse, Environment } from '../types';
 
 export class ScriptRunner {
   private static createPmObject(response: ApiResponse | null, environment: Environment, logs: string[]): any {
@@ -6,113 +6,74 @@ export class ScriptRunner {
 
     return {
       environment: {
-        get: (key: string) => {
-          const value = environment.variables[key] || '';
-          logs.push(`[pm.environment.get] ${key} = ${value}`);
-          return value;
-        },
-        set: (key: string, value: string) => {
-          environment.variables[key] = value;
-          logs.push(`[pm.environment.set] ${key} = ${value}`);
-        }
+        get: (key: string) => environment.variables[key] || '',
+        set: (key: string, value: string) => { environment.variables[key] = value; },
       },
       response: response ? {
         status: response.status,
-        code: response.status, // Postman uses 'code' as well
+        code: response.status,
         statusText: response.statusText,
         headers: response.headers,
-        json: () => {
-          logs.push(`[pm.response.json] Called`);
-          return response.data;
-        },
-        text: () => {
-          const text = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
-          logs.push(`[pm.response.text] Length: ${text.length} chars`);
-          return text;
-        },
+        json: () => response.data,
+        text: () => typeof response.data === 'string' ? response.data : JSON.stringify(response.data),
         time: response.time,
         responseSize: response.size,
-        // Add Postman-style assertion API that can be used in conditionals
         to: {
           have: {
-            status: (expectedStatus: number) => {
-              const matches = response.status === expectedStatus;
-              logs.push(`[pm.response.to.have.status] Expected ${expectedStatus}, got ${response.status} - ${matches ? 'PASS' : 'FAIL'}`);
-              return matches; // Return boolean instead of throwing
-            }
-          }
-        }
+            status: (expectedStatus: number) => response.status === expectedStatus,
+          },
+        },
       } : null,
       test: (name: string, testFn: () => void) => {
         try {
           testFn();
           testResults.push({ name, passed: true });
-          console.log(`✓ ${name}`);
+          logs.push(`✓ ${name}`);
         } catch (error: any) {
           testResults.push({ name, passed: false, error: error.message });
-          console.log(`✗ ${name}: ${error.message}`);
+          logs.push(`✗ ${name}: ${error.message}`);
         }
       },
       expect: (actual: any) => ({
         to: {
           equal: (expected: any) => {
-            if (actual !== expected) {
-              throw new Error(`Expected ${actual} to equal ${expected}`);
-            }
+            if (actual !== expected)
+              throw new Error(`Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`);
           },
           be: {
             oneOf: (values: any[]) => {
-              if (!values.includes(actual)) {
-                throw new Error(`Expected ${actual} to be one of ${values.join(', ')}`);
-              }
-            }
+              if (!values.includes(actual))
+                throw new Error(`Expected ${JSON.stringify(actual)} to be one of [${values.join(', ')}]`);
+            },
           },
           have: {
             status: (expectedStatus: number) => {
-              if (response && response.status !== expectedStatus) {
+              if (response && response.status !== expectedStatus)
                 throw new Error(`Expected status ${expectedStatus}, got ${response.status}`);
-              }
-            }
-          }
-        }
+            },
+          },
+        },
       }),
-      _testResults: testResults
+      _testResults: testResults,
     };
   }
 
   static executePreRequestScript(
     script: string,
-    environment: Environment
+    environment: Environment,
   ): { success: boolean; error?: string; logs: string[] } {
     const logs: string[] = [];
-
     try {
-      logs.push('=== Pre-Request Script Execution Started ===');
-
-      // Create a safe execution context
       const pm = this.createPmObject(null, environment, logs);
       const console = {
-        log: (...args: any[]) => {
-          logs.push('[console.log] ' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
-        },
-        error: (...args: any[]) => {
-          logs.push('[console.error] ' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
-        },
-        warn: (...args: any[]) => {
-          logs.push('[console.warn] ' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
-        }
+        log:   (...args: any[]) => logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')),
+        error: (...args: any[]) => logs.push('error: ' + args.map(String).join(' ')),
+        warn:  (...args: any[]) => logs.push('warn: '  + args.map(String).join(' ')),
       };
-
-      // Create a function with controlled scope
-      const scriptFunction = new Function('pm', 'console', script);
-      scriptFunction(pm, console);
-
-      logs.push('=== Pre-Request Script Completed Successfully ===');
+      new Function('pm', 'console', script)(pm, console);
       return { success: true, logs };
     } catch (error: any) {
-      logs.push(`=== Pre-Request Script Failed ===`);
-      logs.push(`Error: ${error.message}`);
-      logs.push(`Stack: ${error.stack}`);
+      logs.push(`Script error: ${error.message}`);
       return { success: false, error: error.message, logs };
     }
   }
@@ -120,42 +81,27 @@ export class ScriptRunner {
   static executeTestScript(
     script: string,
     response: ApiResponse,
-    environment: Environment
+    environment: Environment,
   ): { success: boolean; error?: string; logs: string[]; testResults: any[] } {
     const logs: string[] = [];
 
-    try {
-      logs.push('=== Test Script Execution Started ===');
-      logs.push(`Response Status: ${response.status} ${response.statusText}`);
-      logs.push(`Response Time: ${response.time}ms`);
+    if (/\bresponseBody\b/.test(script)) {
+      logs.push('⚠ Warning: "responseBody" is a legacy Postman variable and is not supported here. Use pm.response.text() or pm.response.json() instead.');
+    }
 
+    try {
       const pm = this.createPmObject(response, environment, logs);
       const console = {
-        log: (...args: any[]) => {
-          logs.push('[console.log] ' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
-        },
-        error: (...args: any[]) => {
-          logs.push('[console.error] ' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
-        },
-        warn: (...args: any[]) => {
-          logs.push('[console.warn] ' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
-        }
+        log:   (...args: any[]) => logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')),
+        error: (...args: any[]) => logs.push('error: ' + args.map(String).join(' ')),
+        warn:  (...args: any[]) => logs.push('warn: '  + args.map(String).join(' ')),
       };
-
-      // Create a function with controlled scope
-      const scriptFunction = new Function('pm', 'console', script);
-      scriptFunction(pm, console);
-
-      logs.push('=== Test Script Completed Successfully ===');
-      return {
-        success: true,
-        logs,
-        testResults: (pm as any)._testResults || []
-      };
+      // responseBody is passed as undefined so scripts that reference it get a clear warning
+      // rather than a ReferenceError that swallows the rest of the script
+      new Function('pm', 'console', 'responseBody', script)(pm, console, undefined);
+      return { success: true, logs, testResults: (pm as any)._testResults };
     } catch (error: any) {
-      logs.push(`=== Test Script Failed ===`);
-      logs.push(`Error: ${error.message}`);
-      logs.push(`Stack: ${error.stack}`);
+      logs.push(`Script error: ${error.message}`);
       return { success: false, error: error.message, logs, testResults: [] };
     }
   }

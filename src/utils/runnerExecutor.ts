@@ -3,6 +3,7 @@ import {
   Collection, Environment, Certificate, ApiRequest, ApiResponse,
 } from '../types';
 import { HttpService } from './httpService';
+import { ScriptRunner } from './scriptRunner';
 
 // ── Path walking (shared by extractValue + extractArray) ──────────────────────
 
@@ -380,12 +381,32 @@ async function runSequence(
 
       let response: ApiResponse;
       try {
+        // ── Pre-request script ──────────────────────────────────────────────
+        if (request.preRequestScript?.trim()) {
+          const scriptEnv: Environment = ctx.environment
+            ? { ...ctx.environment, variables: { ...vars } }
+            : { id: 'runner-env', name: 'Runner', variables: { ...vars } };
+          const result = ScriptRunner.executePreRequestScript(request.preRequestScript, scriptEnv);
+          vars = { ...vars, ...scriptEnv.variables };
+          for (const msg of result.logs) ctx.onLog?.({ level: 'script', message: msg });
+        }
+
         const mergedEnv: Environment = ctx.environment
           ? { ...ctx.environment, variables: vars }
           : { id: 'runner-env', name: 'Runner', variables: vars };
 
         response = await HttpService.executeRequest(request, mergedEnv, ctx.certificates, ctx.collection);
         resp = response;
+
+        // ── Test script ─────────────────────────────────────────────────────
+        if (request.testScript?.trim()) {
+          const scriptEnv: Environment = ctx.environment
+            ? { ...ctx.environment, variables: { ...vars } }
+            : { id: 'runner-env', name: 'Runner', variables: { ...vars } };
+          const result = ScriptRunner.executeTestScript(request.testScript, response, scriptEnv);
+          vars = { ...vars, ...scriptEnv.variables };
+          for (const msg of result.logs) ctx.onLog?.({ level: 'script', message: msg });
+        }
 
         const ok = response.status >= 200 && response.status < 400;
         ctx.onNodeStatusChange(node.id, {
