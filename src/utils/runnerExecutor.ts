@@ -483,7 +483,136 @@ async function runSequence(
 
       ctx.onEdgeFollowed?.(followedEdge.id);
       currentNodeId = followedEdge.target;
-    } else {
+    }
+
+    // ── Retry ─────────────────────────────────────────────────────────────────
+    if (node.type === 'retry') {
+      const requestId = node.data.requestId as string | undefined;
+      const maxAttempts = (node.data.retryMaxAttempts as number | undefined) ?? 3;
+      const initialDelayMs = (node.data.retryInitialDelayMs as number | undefined) ?? 1000;
+      const backoffMultiplier = (node.data.retryBackoffMultiplier as number | undefined) ?? 2;
+      const retryCondition = node.data.retryCondition as string | undefined;
+
+      let request = ctx.collection.requests.find(r => r.id === requestId);
+      if (!request) {
+        for (const folder of ctx.collection.folders || []) {
+          const found = folder.requests.find(r => r.id === requestId);
+          if (found) { request = found; break; }
+        }
+      }
+
+      if (!request) {
+        ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'error', error: 'Request not found in collection' });
+        ctx.onLog?.({ level: 'error', message: `↺ Retry: request not found in collection` });
+        break;
+      }
+
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
+      ctx.onLog?.({ level: 'info', message: `↺ Retry: ${request.name} (max ${maxAttempts} attempts)` });
+
+      let lastResponse: ApiResponse | undefined;
+      let succeeded = false;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (ctx.signal?.aborted) break;
+
+        if (attempt > 1) {
+          const delayMs = Math.round(initialDelayMs * Math.pow(backoffMultiplier, attempt - 2));
+          ctx.onLog?.({ level: 'info', message: `↺ Attempt ${attempt}/${maxAttempts} — waiting ${delayMs}ms…` });
+          await pause(delayMs, ctx.signal);
+        } else {
+          ctx.onLog?.({ level: 'info', message: `↺ Attempt ${attempt}/${maxAttempts}` });
+        }
+
+        if (ctx.signal?.aborted) break;
+
+        try {
+          const mergedEnv: Environment = ctx.environment
+            ? { ...ctx.environment, variables: vars }
+            : { id: 'runner-env', name: 'Runner', variables: vars };
+
+          const response = await HttpService.executeRequest(request, mergedEnv, ctx.certificates, ctx.collection);
+          lastResponse = response;
+          resp = response;
+
+          const ok = response.status >= 200 && response.status < 400;
+          ctx.onLog?.({
+            level: ok ? 'success' : 'warn',
+            message: `${ok ? '✓' : '!'} ${request.name} → ${response.status} ${response.statusText}`,
+          });
+
+          if (retryCondition?.trim()) {
+            const { passed, error } = evaluateCondition(retryCondition, response, vars, ctx.onLog);
+            if (error) ctx.onLog?.({ level: 'warn', message: `↺ Condition error: ${error}` });
+            if (passed) { succeeded = true; break; }
+          } else {
+            if (ok) { succeeded = true; break; }
+          }
+        } catch (err: any) {
+          ctx.onLog?.({ level: 'error', message: `↺ Attempt ${attempt} error: ${err.message || String(err)}` });
+        }
+      }
+
+      if (!succeeded) {
+        ctx.onLog?.({ level: 'error', message: `↺ Retry exhausted after ${maxAttempts} attempt(s)` });
+      } else {
+        ctx.onLog?.({ level: 'success', message: `↺ Retry succeeded` });
+      }
+
+      ctx.onNodeStatusChange(node.id, {
+        nodeId: node.id,
+        status: succeeded ? 'success' : 'error',
+        response: lastResponse,
+        request: request ? resolveRequest(request, vars) : undefined,
+      });
+
+      // Continue regardless of success/failure
+      const retryNextEdge = ctx.outgoingEdges[node.id]?.[0];
+      if (!retryNextEdge) break;
+      if (retryNextEdge.data?.mappings?.length && lastResponse) {
+        vars = applyMappings(lastResponse, retryNextEdge.data.mappings, vars);
+      }
+      ctx.onEdgeFollowed?.(retryNextEdge.id);
+      currentNodeId = retryNextEdge.target;
+      continue;
+    }
+
+    // ── SetVariable ───────────────────────────────────────────────────────────
+    if (node.type === 'setvariable') {
+      const assignments = (node.data.assignments as Array<{ variable: string; expression: string }> | undefined) || [];
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'running' });
+      ctx.onLog?.({ level: 'info', message: `x= Set Variable${assignments.length !== 1 ? 's' : ''} (${assignments.length})` });
+
+      for (const { variable, expression } of assignments) {
+        if (!variable.trim()) continue;
+        try {
+          let value: string;
+          try {
+            // Try JS expression with variables in scope
+            // eslint-disable-next-line no-new-func
+            const fn = new Function('variables', '"use strict"; return String(' + expression + ')');
+            value = fn({ ...vars });
+          } catch {
+            // Fallback: {{var}} template substitution
+            value = expression.replace(/\{\{([\w.]+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
+          }
+          vars[variable.trim()] = value;
+          const display = value.length > 60 ? value.slice(0, 60) + '…' : value;
+          ctx.onLog?.({ level: 'info', message: `x= ${variable.trim()} = "${display}"` });
+        } catch (err: any) {
+          ctx.onLog?.({ level: 'warn', message: `x= Error setting ${variable}: ${err.message}` });
+        }
+      }
+
+      ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'success' });
+      const setVarNextEdge = ctx.outgoingEdges[node.id]?.[0];
+      if (!setVarNextEdge) break;
+      ctx.onEdgeFollowed?.(setVarNextEdge.id);
+      currentNodeId = setVarNextEdge.target;
+      continue;
+    }
+
+    if (!['start', 'request', 'end', 'delay', 'foreach', 'debug', 'retry', 'setvariable'].includes(node.type)) {
       break; // unknown node type
     }
   }

@@ -1051,6 +1051,43 @@ ipcMain.handle('delete-runner', async (event, workspaceId, runnerId) => {
   }
 });
 
+ipcMain.handle('load-runner-history', async (event, workspaceId: string, runnerId: string) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const histDir = path.join(workspacePath, 'runner-history', runnerId);
+    try {
+      await fs.access(histDir);
+    } catch {
+      return { success: true, entries: [] };
+    }
+    const files = await fs.readdir(histDir);
+    const jsonFiles = files.filter((f: string) => f.endsWith('.json'));
+    const entries: any[] = [];
+    for (const file of jsonFiles) {
+      try {
+        const content = await fs.readFile(path.join(histDir, file), 'utf-8');
+        entries.push(JSON.parse(content));
+      } catch { /* skip corrupt */ }
+    }
+    entries.sort((a: any, b: any) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+    return { success: true, entries: entries.slice(0, 50) };
+  } catch (error) {
+    return { success: false, entries: [], error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('save-runner-history', async (event, workspaceId: string, entry: any) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+    const histDir = path.join(workspacePath, 'runner-history', entry.runnerId);
+    await fs.mkdir(histDir, { recursive: true });
+    await fs.writeFile(path.join(histDir, `${entry.id}.json`), JSON.stringify(entry, null, 2));
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 // HTTP Request handler - runs in Node.js, no CORS restrictions!
 ipcMain.handle('execute-http-request', async (event, requestConfig) => {
   const startTime = Date.now();

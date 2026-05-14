@@ -16,9 +16,9 @@ import {
 import '@xyflow/react/dist/style.css';
 import {
   Runner, RunnerNode, RunnerEdge, RunnerNodeResult, RunnerLogEntry,
-  Collection, Environment, Certificate, ApiRequest, ApiResponse, DataMapping,
+  Collection, Environment, Certificate, ApiRequest, ApiResponse, DataMapping, RunHistory,
 } from '../types';
-import { StartNode, RequestNode, EndNode, DelayNode, ForEachNode, DebugNode } from './RunnerNodes';
+import { StartNode, RequestNode, EndNode, DelayNode, ForEachNode, DebugNode, RetryNode, SetVariableNode } from './RunnerNodes';
 import { executeRunner } from '../utils/runnerExecutor';
 
 // Node types must be defined outside the component to avoid re-creation on render
@@ -29,6 +29,8 @@ const nodeTypes: NodeTypes = {
   delay: DelayNode as any,
   foreach: ForEachNode as any,
   debug: DebugNode as any,
+  retry: RetryNode as any,
+  setvariable: SetVariableNode as any,
 };
 
 interface RunnerCanvasProps {
@@ -297,6 +299,21 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
   const [showNodesMenu, setShowNodesMenu] = useState(false);
   const nodesMenuAnchorRef = useRef<{ top: number; left: number } | null>(null);
 
+  const [retryConfigNodeId, setRetryConfigNodeId] = useState<string | null>(null);
+  const [retryRequestIdDraft, setRetryRequestIdDraft] = useState('');
+  const [retryMaxAttemptsDraft, setRetryMaxAttemptsDraft] = useState('3');
+  const [retryInitialDelayDraft, setRetryInitialDelayDraft] = useState('1000');
+  const [retryBackoffDraft, setRetryBackoffDraft] = useState('2');
+  const [retryConditionDraft, setRetryConditionDraft] = useState('');
+
+  const [setVarConfigNodeId, setSetVarConfigNodeId] = useState<string | null>(null);
+  const [setVarAssignmentsDraft, setSetVarAssignmentsDraft] = useState<Array<{variable: string; expression: string}>>([]);
+
+  const [runHistory, setRunHistory] = useState<RunHistory[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+  const runnerLogsRef = useRef<RunnerLogEntry[]>([]);
+
   const showToast = useCallback(() => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setSaveToast(true);
@@ -435,6 +452,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setSelectedNodeId(null);
     setFollowedEdgeIds(new Set());
     setRunnerLogs([]);
+    runnerLogsRef.current = [];
   }, [runner.id]);
 
   // Re-style edges whenever followedEdgeIds changes (after a run)
@@ -463,6 +481,14 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [runnerLogs]);
+
+  // Load history on mount
+  useEffect(() => {
+    if (!runner.workspaceId || !runner.id) return;
+    window.electronAPI.loadRunnerHistory(runner.workspaceId, runner.id)
+      .then(result => { if (result.success) setRunHistory(result.entries); })
+      .catch(() => {});
+  }, [runner.id, runner.workspaceId]);
 
   const handleDeleteNode = useCallback((nodeId: string, label: string) => {
     if (!confirm(`Delete "${label}"? Any connected edges will also be removed.`)) return;
@@ -507,6 +533,22 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     if (node.type === 'debug') {
       setDebugScriptDraft((node.data.debugScript as string | undefined) ?? '');
       setDebugConfigNodeId(node.id);
+      return;
+    }
+    if (node.type === 'retry') {
+      const d = node.data as any;
+      setRetryRequestIdDraft(d.requestId || '');
+      setRetryMaxAttemptsDraft(String(d.retryMaxAttempts ?? 3));
+      setRetryInitialDelayDraft(String(d.retryInitialDelayMs ?? 1000));
+      setRetryBackoffDraft(String(d.retryBackoffMultiplier ?? 2));
+      setRetryConditionDraft(d.retryCondition || '');
+      setRetryConfigNodeId(node.id);
+      return;
+    }
+    if (node.type === 'setvariable') {
+      const d = node.data as any;
+      setSetVarAssignmentsDraft((d.assignments || [{ variable: '', expression: '' }]).map((a: any) => ({ ...a })));
+      setSetVarConfigNodeId(node.id);
       return;
     }
     // Request node → inline response panel
@@ -572,6 +614,43 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setDebugConfigNodeId(null);
   }, [debugConfigNodeId, debugScriptDraft, setNodes]);
 
+  const handleSaveRetryConfig = useCallback(() => {
+    if (!retryConfigNodeId) return;
+    const allRequests = [
+      ...collection.requests,
+      ...(collection.folders || []).flatMap(f => f.requests),
+    ];
+    const req = allRequests.find(r => r.id === retryRequestIdDraft);
+    setNodes(prev => prev.map(n => n.id !== retryConfigNodeId ? n : {
+      ...n,
+      data: {
+        ...n.data,
+        requestId: retryRequestIdDraft,
+        requestLabel: req?.name || 'Unknown request',
+        retryMaxAttempts: parseInt(retryMaxAttemptsDraft) || 3,
+        retryInitialDelayMs: parseInt(retryInitialDelayDraft) || 1000,
+        retryBackoffMultiplier: parseFloat(retryBackoffDraft) || 2,
+        retryCondition: retryConditionDraft.trim() || undefined,
+        label: `↺ ${req?.name || 'retry'}`,
+      },
+    }));
+    setRetryConfigNodeId(null);
+  }, [retryConfigNodeId, retryRequestIdDraft, retryMaxAttemptsDraft, retryInitialDelayDraft, retryBackoffDraft, retryConditionDraft, collection, setNodes]);
+
+  const handleSaveSetVarConfig = useCallback(() => {
+    if (!setVarConfigNodeId) return;
+    const filtered = setVarAssignmentsDraft.filter(a => a.variable.trim());
+    setNodes(prev => prev.map(n => n.id !== setVarConfigNodeId ? n : {
+      ...n,
+      data: {
+        ...n.data,
+        assignments: filtered,
+        label: filtered.length > 0 ? `x= ${filtered.map(a => a.variable).join(', ')}` : 'x= Set Variables',
+      },
+    }));
+    setSetVarConfigNodeId(null);
+  }, [setVarConfigNodeId, setVarAssignmentsDraft, setNodes]);
+
   const handleAddDebug = useCallback(() => {
     const { x, y } = getCanvasCenter();
     const newNode: Node = {
@@ -607,6 +686,17 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         ...(n.type === 'debug' && (n.data.debugScript as string | undefined)
           ? { debugScript: (n.data.debugScript as string) }
           : {}),
+        ...(n.type === 'retry' ? {
+          requestId: n.data.requestId as string | undefined,
+          requestLabel: n.data.requestLabel as string | undefined,
+          retryMaxAttempts: n.data.retryMaxAttempts as number | undefined,
+          retryInitialDelayMs: n.data.retryInitialDelayMs as number | undefined,
+          retryBackoffMultiplier: n.data.retryBackoffMultiplier as number | undefined,
+          retryCondition: n.data.retryCondition as string | undefined,
+        } : {}),
+        ...(n.type === 'setvariable' ? {
+          assignments: n.data.assignments as Array<{variable: string; expression: string}> | undefined,
+        } : {}),
       },
     }));
 
@@ -651,6 +741,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setSelectedNodeId(null);
     setFollowedEdgeIds(new Set());
     setRunnerLogs([]);
+    runnerLogsRef.current = [];
   }, [runner, toFlowNodes, toFlowEdges]);
 
   const handleConnect = useCallback((params: Connection) => {
@@ -709,6 +800,26 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setNodes(prev => prev.concat(newNode));
   }, [getCanvasCenter, setNodes]);
 
+  const handleAddRetry = useCallback(() => {
+    const { x, y } = getCanvasCenter();
+    const newNode: Node = {
+      id: `retry-${Date.now()}`, type: 'retry',
+      position: { x: x - 85, y: y - 40 },
+      data: { label: '↺ retry', retryMaxAttempts: 3, retryInitialDelayMs: 1000, retryBackoffMultiplier: 2 },
+    };
+    setNodes(prev => prev.concat(newNode));
+  }, [getCanvasCenter, setNodes]);
+
+  const handleAddSetVariable = useCallback(() => {
+    const { x, y } = getCanvasCenter();
+    const newNode: Node = {
+      id: `setvariable-${Date.now()}`, type: 'setvariable',
+      position: { x: x - 85, y: y - 40 },
+      data: { label: 'x= Set Variables', assignments: [] },
+    };
+    setNodes(prev => prev.concat(newNode));
+  }, [getCanvasCenter, setNodes]);
+
   const handleRun = useCallback(async () => {
     if (isRunning) return;
     setIsRunning(true);
@@ -716,6 +827,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setSelectedNodeId(null);
     setFollowedEdgeIds(new Set());
     setRunnerLogs([]);
+    runnerLogsRef.current = [];
     setShowLog(true);
     runStartRef.current = Date.now();
     abortControllerRef.current = new AbortController();
@@ -738,11 +850,40 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
           setFollowedEdgeIds(prev => new Set([...prev, edgeId]));
         },
         (entry) => {
-          setRunnerLogs(prev => [...prev, { ...entry, timestamp: Date.now() }]);
+          const newEntry = { ...entry, timestamp: Date.now() };
+          setRunnerLogs(prev => {
+            const updated = [...prev, newEntry];
+            runnerLogsRef.current = updated;
+            return updated;
+          });
         },
         abortControllerRef.current?.signal,
       );
     } finally {
+      const completedAt = new Date().toISOString();
+      const durationMs = Date.now() - runStartRef.current;
+      // Save history entry
+      setNodeResults(prev => {
+        const allResults = Object.values(prev);
+        const hasError = allResults.some(r => r.status === 'error');
+        const wasAborted = abortControllerRef.current?.signal.aborted;
+        const runStatus: RunHistory['status'] = wasAborted ? 'aborted' : hasError ? 'error' : 'success';
+        const entry: RunHistory = {
+          id: `run-${Date.now()}`,
+          runnerId: runner.id,
+          workspaceId: runner.workspaceId,
+          runnerName: runner.name,
+          startedAt: new Date(Date.now() - durationMs).toISOString(),
+          completedAt,
+          durationMs,
+          status: runStatus,
+          logs: runnerLogsRef.current,
+          nodeResults: prev,
+        };
+        window.electronAPI.saveRunnerHistory(runner.workspaceId, entry).catch(() => {});
+        setRunHistory(h => [entry, ...h.slice(0, 49)]);
+        return prev;
+      });
       setIsRunning(false);
     }
   }, [isRunning, buildRunnerFromFlow, collection, activeEnvironment, certificates, toFlowEdges]);
@@ -1026,6 +1167,8 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
                 { icon: '{}', label: 'Debug Script', action: handleAddDebug },
                 { icon: '⏱', label: 'Delay', action: handleAddDelay },
                 { icon: '↻', label: 'For Each', action: handleAddForeach },
+                { icon: '↺', label: 'Retry Request', action: handleAddRetry },
+                { icon: 'x=', label: 'Set Variable', action: handleAddSetVariable },
               ].map(({ icon, label, action }) => (
                 <div
                   key={label}
@@ -1046,6 +1189,26 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         <button className="button button-secondary" onClick={handleCancel} title="Discard unsaved changes and revert to last saved version" style={{ color: '#f87171', borderColor: '#f87171' }}>Revert</button>
         <button className="button button-secondary" onClick={handleExport} title="Export runner as JSON">Export</button>
         <button className="button button-secondary" onClick={handleImport} title="Import runner from JSON">Import</button>
+
+        <button
+          className={`button ${showHistory ? '' : 'button-secondary'}`}
+          onClick={() => { setShowHistory(v => !v); if (showHistory) setExpandedHistoryId(null); }}
+          title="Run history"
+          style={{ position: 'relative' }}
+        >
+          History
+          {runHistory.length > 0 && (
+            <span style={{
+              position: 'absolute', top: -4, right: -4,
+              background: '#0d7377', color: '#fff',
+              borderRadius: '50%', width: 16, height: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.55rem', fontWeight: 700,
+            }}>
+              {runHistory.length > 99 ? '99+' : runHistory.length}
+            </span>
+          )}
+        </button>
 
         <button
           className={`button ${showLog ? '' : 'button-secondary'}`}
@@ -1129,6 +1292,95 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
           />
         )}
       </div>{/* end canvas + response panel row */}
+
+      {/* Run history panel */}
+      {showHistory && (
+        <div style={{
+          height: 240, flexShrink: 0, borderTop: '1px solid #2a2a2a',
+          background: '#0a0a0a', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '0.3rem 0.75rem', borderBottom: '1px solid #1a1a1a',
+            background: '#111', flexShrink: 0,
+          }}>
+            <span style={{ fontSize: '0.72rem', color: '#555', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Run History
+            </span>
+            <span style={{ fontSize: '0.7rem', color: '#333' }}>{runHistory.length} runs</span>
+            <button
+              onClick={() => setRunHistory([])}
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#444', cursor: 'pointer', fontSize: '0.72rem' }}
+            >
+              Clear
+            </button>
+            <button
+              onClick={() => setShowHistory(false)}
+              style={{ background: 'none', border: 'none', color: '#444', cursor: 'pointer', fontSize: '0.9rem', lineHeight: 1 }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {runHistory.length === 0 ? (
+              <div style={{ padding: '0.75rem', color: '#333', fontSize: '0.78rem', fontStyle: 'italic' }}>
+                No runs yet — click Run to start.
+              </div>
+            ) : runHistory.map(entry => {
+              const isExpanded = expandedHistoryId === entry.id;
+              const dur = entry.durationMs >= 1000
+                ? `${(entry.durationMs / 1000).toFixed(1)}s`
+                : `${entry.durationMs}ms`;
+              const nodeCount = Object.keys(entry.nodeResults).length;
+              const errCount = Object.values(entry.nodeResults).filter(r => r.status === 'error').length;
+              const summary = errCount > 0
+                ? `${errCount} error${errCount > 1 ? 's' : ''}, ${nodeCount - errCount} ok`
+                : `${nodeCount} node${nodeCount !== 1 ? 's' : ''} ok`;
+              const statusColor = entry.status === 'success' ? '#4ade80' : entry.status === 'aborted' ? '#f59e0b' : '#f87171';
+              const statusIcon = entry.status === 'success' ? '✓' : entry.status === 'aborted' ? '⏹' : '✗';
+              const ts = new Date(entry.startedAt);
+              const timeStr = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              return (
+                <div key={entry.id}>
+                  <div
+                    onClick={() => setExpandedHistoryId(isExpanded ? null : entry.id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '0.35rem 0.75rem',
+                      borderBottom: '1px solid #111', cursor: 'pointer', fontSize: '0.75rem',
+                      background: isExpanded ? '#141414' : 'transparent',
+                    }}
+                    onMouseEnter={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = '#0f0f0f'; }}
+                    onMouseLeave={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                  >
+                    <span style={{ color: statusColor, flexShrink: 0, fontWeight: 700 }}>{statusIcon}</span>
+                    <span style={{ color: '#555', flexShrink: 0 }}>{timeStr}</span>
+                    <span style={{ color: '#3a3a3a', flexShrink: 0 }}>{dur}</span>
+                    <span style={{ color: '#666', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
+                    <span style={{ color: '#333', fontSize: '0.65rem' }}>{isExpanded ? '▲' : '▼'}</span>
+                  </div>
+                  {isExpanded && (
+                    <div style={{ background: '#060606', borderBottom: '1px solid #111', maxHeight: 120, overflowY: 'auto' }}>
+                      {entry.logs.map((log, i) => {
+                        const logColors: Record<string, string> = {
+                          info: '#888', success: '#4ade80', warn: '#f59e0b', error: '#f87171', script: '#0d9e9e',
+                        };
+                        return (
+                          <div key={i} style={{
+                            padding: '0.1rem 0.75rem', fontSize: '0.72rem', fontFamily: 'monospace',
+                            color: logColors[log.level] || '#888', lineHeight: 1.5,
+                          }}>
+                            {log.message}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Execution log panel */}
       {showLog && (
@@ -1659,6 +1911,127 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '0.75rem 1rem', borderTop: '1px solid #333' }}>
               <button className="button button-secondary" onClick={() => setDebugConfigNodeId(null)}>Cancel</button>
               <button className="button" onClick={handleSaveDebugConfig}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Retry config dialog */}
+      {retryConfigNodeId && (() => {
+        const allRequests = [
+          ...collection.requests,
+          ...(collection.folders || []).flatMap(f => f.requests),
+        ];
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
+            <div style={{ background: '#1a1a1a', border: '1px solid #444', borderRadius: 8, width: 480, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', borderBottom: '1px solid #333' }}>
+                <span style={{ color: '#fbbf24', fontWeight: 600, fontSize: '0.9rem' }}>↺ Retry Request</span>
+                <button onClick={() => setRetryConfigNodeId(null)} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ display: 'block', color: '#888', fontSize: '0.78rem', marginBottom: '0.3rem' }}>Request to retry</label>
+                  <select
+                    className="form-input"
+                    value={retryRequestIdDraft}
+                    onChange={e => setRetryRequestIdDraft(e.target.value)}
+                    style={{ width: '100%' }}
+                  >
+                    <option value="">— select a request —</option>
+                    {allRequests.map(r => (
+                      <option key={r.id} value={r.id}>{r.method} {r.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                  <div>
+                    <label style={{ display: 'block', color: '#888', fontSize: '0.78rem', marginBottom: '0.3rem' }}>Max attempts</label>
+                    <input className="form-input" type="number" min={1} max={20} value={retryMaxAttemptsDraft} onChange={e => setRetryMaxAttemptsDraft(e.target.value)} style={{ width: '100%' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', color: '#888', fontSize: '0.78rem', marginBottom: '0.3rem' }}>Initial delay (ms)</label>
+                    <input className="form-input" type="number" min={0} value={retryInitialDelayDraft} onChange={e => setRetryInitialDelayDraft(e.target.value)} style={{ width: '100%' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', color: '#888', fontSize: '0.78rem', marginBottom: '0.3rem' }}>Backoff ×</label>
+                    <input className="form-input" type="number" min={1} step={0.1} value={retryBackoffDraft} onChange={e => setRetryBackoffDraft(e.target.value)} style={{ width: '100%' }} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ display: 'block', color: '#888', fontSize: '0.78rem', marginBottom: '0.3rem' }}>
+                    Stop condition <span style={{ color: '#555' }}>(JS: return true = success, leave blank for 2xx)</span>
+                  </label>
+                  <textarea
+                    className="form-textarea"
+                    value={retryConditionDraft}
+                    onChange={e => setRetryConditionDraft(e.target.value)}
+                    placeholder={'return response.status === 200;\n// or:\nreturn body.status === "ready";'}
+                    style={{ minHeight: 80, fontFamily: 'monospace', fontSize: '0.82rem', resize: 'vertical', width: '100%' }}
+                    spellCheck={false}
+                  />
+                </div>
+                <div style={{ background: '#111', borderRadius: 4, padding: '0.5rem 0.75rem', fontSize: '0.73rem', color: '#555', lineHeight: 1.7 }}>
+                  <code style={{ color: '#0d9e9e' }}>response</code> · <code style={{ color: '#0d9e9e' }}>body</code> · <code style={{ color: '#0d9e9e' }}>status</code> · <code style={{ color: '#0d9e9e' }}>headers</code> · <code style={{ color: '#0d9e9e' }}>variables</code>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '0.75rem 1rem', borderTop: '1px solid #333' }}>
+                <button className="button button-secondary" onClick={() => setRetryConfigNodeId(null)}>Cancel</button>
+                <button className="button" onClick={handleSaveRetryConfig}>Save</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Set Variable config dialog */}
+      {setVarConfigNodeId && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
+          <div style={{ background: '#1a1a1a', border: '1px solid #444', borderRadius: 8, width: 520, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', borderBottom: '1px solid #333' }}>
+              <span style={{ color: '#818cf8', fontWeight: 600, fontSize: '0.9rem' }}>x= Set Variables</span>
+              <button onClick={() => setSetVarConfigNodeId(null)} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+              <p style={{ color: '#888', fontSize: '0.78rem', margin: '0 0 0.75rem', lineHeight: 1.6 }}>
+                Each expression is evaluated as JavaScript with <code style={{ background: '#111', padding: '0 3px', borderRadius: 3, color: '#0d9e9e' }}>variables</code> in scope, or as a <code style={{ background: '#111', padding: '0 3px', borderRadius: 3, color: '#0d9e9e' }}>{'{{var}}'}</code> template if evaluation fails.
+              </p>
+              {setVarAssignmentsDraft.map((a, i) => (
+                <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                  <input
+                    className="form-input"
+                    placeholder="variable name"
+                    value={a.variable}
+                    onChange={e => setSetVarAssignmentsDraft(prev => prev.map((x, j) => j === i ? { ...x, variable: e.target.value } : x))}
+                    style={{ width: 140, flexShrink: 0 }}
+                  />
+                  <span style={{ color: '#555', flexShrink: 0 }}>=</span>
+                  <input
+                    className="form-input"
+                    placeholder='expression or {{var}}'
+                    value={a.expression}
+                    onChange={e => setSetVarAssignmentsDraft(prev => prev.map((x, j) => j === i ? { ...x, expression: e.target.value } : x))}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    onClick={() => setSetVarAssignmentsDraft(prev => prev.filter((_, j) => j !== i))}
+                    style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '0.9rem', flexShrink: 0 }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <button
+                className="button button-secondary"
+                onClick={() => setSetVarAssignmentsDraft(prev => [...prev, { variable: '', expression: '' }])}
+                style={{ marginTop: 4, fontSize: '0.8rem' }}
+              >
+                + Add
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '0.75rem 1rem', borderTop: '1px solid #333' }}>
+              <button className="button button-secondary" onClick={() => setSetVarConfigNodeId(null)}>Cancel</button>
+              <button className="button" onClick={handleSaveSetVarConfig}>Save</button>
             </div>
           </div>
         </div>

@@ -332,6 +332,148 @@ export const ForEachNode: React.FC<ForEachNodeProps> = ({ data }) => {
   );
 };
 
+// ── RetryNode ────────────────────────────────────────────────────────────────
+
+interface RetryNodeProps {
+  data: {
+    label: string;
+    id?: string;
+    requestLabel?: string;
+    retryMaxAttempts?: number;
+    retryInitialDelayMs?: number;
+    retryBackoffMultiplier?: number;
+    result?: RunnerNodeResult;
+    __results?: Record<string, RunnerNodeResult>;
+    __nodeId?: string;
+    onDelete?: () => void;
+    isSelected?: boolean;
+  };
+  selected?: boolean;
+}
+
+export const RetryNode: React.FC<RetryNodeProps> = ({ data, selected }) => {
+  const [hovered, setHovered] = useState(false);
+  const results = (data.__results || {}) as Record<string, RunnerNodeResult>;
+  const result = results[data.id as string] || results[(data as any).__nodeId as string] || data.result;
+  const status = result?.status ?? 'idle';
+
+  const borderColor = selected || data.isSelected ? '#fff'
+    : status === 'running' ? '#f59e0b'
+    : status === 'success' ? '#22c55e'
+    : status === 'error'   ? '#ef4444'
+    : '#b45309';
+
+  const reqName = data.requestLabel as string | undefined;
+  const maxAttempts = (data.retryMaxAttempts as number | undefined) ?? 3;
+  const initialDelay = (data.retryInitialDelayMs as number | undefined) ?? 1000;
+  const multiplier = (data.retryBackoffMultiplier as number | undefined) ?? 2;
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: '#1c1a14',
+        border: `1.5px solid ${borderColor}`,
+        borderRadius: 8,
+        padding: '0.5rem 0.75rem',
+        minWidth: 170,
+        fontFamily: 'monospace',
+        fontSize: '0.8rem',
+        cursor: 'pointer',
+        position: 'relative',
+      }}
+    >
+      {hovered && data.onDelete && <DeleteButton onDelete={data.onDelete} />}
+      <Handle type="target" position={Position.Top} style={{ background: '#b45309' }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ color: '#fbbf24', fontSize: '1rem' }}>↺</span>
+        <span style={{ color: '#fbbf24', fontWeight: 700, fontSize: '0.72rem', letterSpacing: '0.5px' }}>RETRY</span>
+        {result && <NodeStatusBadge status={status} />}
+      </div>
+      {reqName ? (
+        <div style={{ color: '#e0e0e0', fontSize: '0.8rem', marginBottom: 2 }}>{reqName}</div>
+      ) : (
+        <div style={{ color: '#555', fontSize: '0.75rem', fontStyle: 'italic' }}>click to configure</div>
+      )}
+      <div style={{ color: '#666', fontSize: '0.7rem', marginTop: 2 }}>
+        max {maxAttempts} · {initialDelay}ms · ×{multiplier}
+      </div>
+      <Handle type="source" position={Position.Bottom} style={{ background: '#b45309' }} />
+    </div>
+  );
+};
+
+// ── SetVariableNode ──────────────────────────────────────────────────────────
+
+interface SetVariableNodeProps {
+  data: {
+    label: string;
+    id?: string;
+    assignments?: Array<{ variable: string; expression: string }>;
+    result?: RunnerNodeResult;
+    __results?: Record<string, RunnerNodeResult>;
+    __nodeId?: string;
+    onDelete?: () => void;
+    isSelected?: boolean;
+  };
+  selected?: boolean;
+}
+
+export const SetVariableNode: React.FC<SetVariableNodeProps> = ({ data, selected }) => {
+  const [hovered, setHovered] = useState(false);
+  const results = (data.__results || {}) as Record<string, RunnerNodeResult>;
+  const result = results[data.id as string] || results[(data as any).__nodeId as string] || data.result;
+  const status = result?.status ?? 'idle';
+
+  const borderColor = selected || data.isSelected ? '#fff'
+    : status === 'running' ? '#f59e0b'
+    : status === 'success' ? '#22c55e'
+    : status === 'error'   ? '#ef4444'
+    : '#4f46e5';
+
+  const assignments = (data.assignments as Array<{ variable: string; expression: string }> | undefined) || [];
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: '#0f0d1f',
+        border: `1.5px solid ${borderColor}`,
+        borderRadius: 8,
+        padding: '0.5rem 0.75rem',
+        minWidth: 170,
+        fontFamily: 'monospace',
+        fontSize: '0.8rem',
+        cursor: 'pointer',
+        position: 'relative',
+      }}
+    >
+      {hovered && data.onDelete && <DeleteButton onDelete={data.onDelete} />}
+      <Handle type="target" position={Position.Top} style={{ background: '#6366f1' }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ color: '#818cf8', fontSize: '0.9rem' }}>x=</span>
+        <span style={{ color: '#818cf8', fontWeight: 700, fontSize: '0.72rem', letterSpacing: '0.5px' }}>SET VAR</span>
+        {result && <NodeStatusBadge status={status} />}
+      </div>
+      {assignments.length === 0 ? (
+        <div style={{ color: '#555', fontSize: '0.75rem', fontStyle: 'italic' }}>click to configure</div>
+      ) : (
+        assignments.slice(0, 3).map((a, i) => (
+          <div key={i} style={{ color: '#aaa', fontSize: '0.72rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 150 }}>
+            {a.variable} = <span style={{ color: '#6366f1' }}>{a.expression}</span>
+          </div>
+        ))
+      )}
+      {assignments.length > 3 && (
+        <div style={{ color: '#555', fontSize: '0.7rem' }}>+{assignments.length - 3} more</div>
+      )}
+      <Handle type="source" position={Position.Bottom} style={{ background: '#6366f1' }} />
+    </div>
+  );
+};
+
 // ── EndNode ──────────────────────────────────────────────────────────────────
 
 interface EndNodeProps {

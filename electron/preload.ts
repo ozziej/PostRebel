@@ -55,6 +55,8 @@ export interface ElectronAPI {
   loadRunners: (workspaceId: string) => Promise<any>;
   saveRunner: (workspaceId: string, runner: any) => Promise<any>;
   deleteRunner: (workspaceId: string, runnerId: string) => Promise<any>;
+  loadRunnerHistory: (workspaceId: string, runnerId: string) => Promise<any>;
+  saveRunnerHistory: (workspaceId: string, entry: any) => Promise<any>;
 }
 
 const api: ElectronAPI = {
@@ -112,6 +114,8 @@ const api: ElectronAPI = {
   loadRunners: (workspaceId) => ipcRenderer.invoke('load-runners', workspaceId),
   saveRunner: (workspaceId, runner) => ipcRenderer.invoke('save-runner', workspaceId, runner),
   deleteRunner: (workspaceId, runnerId) => ipcRenderer.invoke('delete-runner', workspaceId, runnerId),
+  loadRunnerHistory: (workspaceId, runnerId) => ipcRenderer.invoke('load-runner-history', workspaceId, runnerId),
+  saveRunnerHistory: (workspaceId, entry) => ipcRenderer.invoke('save-runner-history', workspaceId, entry),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

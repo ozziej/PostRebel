@@ -134,11 +134,16 @@ export interface RunnerNodeData extends Record<string, unknown> {
   foreachExpression?: string;                             // foreach: array source (body.x.y or varName)
   foreachItemVar?: string;                                // foreach: variable prefix for each item
   debugScript?: string;                                   // debug nodes: JS script with console.log
+  retryMaxAttempts?: number;           // retry node: max attempts (default 3)
+  retryInitialDelayMs?: number;        // retry node: initial wait in ms (default 1000)
+  retryBackoffMultiplier?: number;     // retry node: multiplier per attempt (default 2)
+  retryCondition?: string;             // retry node: JS returning true = stop retrying
+  assignments?: Array<{ variable: string; expression: string }>; // setvariable node
 }
 
 export interface RunnerNode {
   id: string;
-  type: 'start' | 'request' | 'end' | 'delay' | 'foreach' | 'debug';
+  type: 'start' | 'request' | 'end' | 'delay' | 'foreach' | 'debug' | 'retry' | 'setvariable';
   position: { x: number; y: number };
   data: RunnerNodeData;
 }
@@ -168,6 +173,19 @@ export interface RunnerNodeResult {
   response?: ApiResponse;
   request?: ApiRequest;   // the request that was executed (pre-resolution template)
   error?: string;
+}
+
+export interface RunHistory {
+  id: string;
+  runnerId: string;
+  workspaceId: string;
+  runnerName: string;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  status: 'success' | 'error' | 'aborted';
+  logs: RunnerLogEntry[];
+  nodeResults: Record<string, RunnerNodeResult>;
 }
 
 export interface ScriptContext {
@@ -238,6 +256,8 @@ declare global {
       loadRunners: (workspaceId: string) => Promise<{ success: boolean; runners: Runner[] }>;
       saveRunner: (workspaceId: string, runner: Runner) => Promise<{ success: boolean; error?: string }>;
       deleteRunner: (workspaceId: string, runnerId: string) => Promise<{ success: boolean; error?: string }>;
+      loadRunnerHistory: (workspaceId: string, runnerId: string) => Promise<{ success: boolean; entries: RunHistory[] }>;
+      saveRunnerHistory: (workspaceId: string, entry: RunHistory) => Promise<{ success: boolean; error?: string }>;
     };
   }
 }
