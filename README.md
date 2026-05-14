@@ -31,7 +31,9 @@ A local API testing tool with git support - your Postman alternative.
 - **Find in request/response** - `Cmd+F` / `Ctrl+F` searches across all request and response content with plain text, case-sensitive, whole-word, and regex modes
 - **Keyboard shortcuts** - Configurable shortcuts for common actions (Send: `Cmd+Enter` / `Ctrl+Enter`); customise in Settings
 - **Image responses** - APIs that return images (`image/*`) display the image inline with download and actual-size controls
-- **Collection Runner** - Visual flow-based runner with Request, Debug, Delay, and For Each node types; JavaScript conditional branching; per-edge data mappings and output expressions; execution log with `console.log` support; dot-notation variable access (`{{item.userId}}`); Start-node variable overrides; and inline request+response inspection per node
+- **Collection Runner** - Visual flow-based runner with Request, Retry (exponential back-off + stop condition), Set Variable, Debug, Delay, and For Each node types; JavaScript conditional branching; per-edge data mappings and output expressions; execution log with `console.log` support; dot-notation variable access (`{{item.userId}}`); Start-node variable overrides; inline request+response inspection per node; and run history panel with expandable per-run logs
+- **Code generation** - `</> Code` button in the URL bar generates cURL, JavaScript fetch, and Python `requests` snippets for the current request with environment variables substituted and auth resolved
+- **Test results panel** - Tests tab in the response panel surfaces `pm.test()` pass/fail results with per-test error details and a badge showing the failure count
 
 ## Search and Find
 
@@ -211,6 +213,9 @@ PostRebel/
 │       │   └── dev.secrets.json    # Secret variables (gitignored)
 │       ├── runners/                # Collection runners (committed)
 │       │   └── <id>.json           # One file per runner
+│       ├── runner-history/         # Runner run history (local only)
+│       │   └── <runner-id>/
+│       │       └── <run-id>.json   # One file per completed run
 │       ├── history/                # Request execution history
 │       │   └── history.json        # Log entries (local only)
 │       └── certificates/           # Custom certificates (NOT committed)
@@ -276,6 +281,8 @@ The Collection Runner lets you chain multiple requests together into a visual fl
 |------|---------|
 | **Start** (green circle) | Entry point — click to set per-run variable overrides |
 | **Request** (dark card) | Executes one API request from the collection |
+| **Retry** (amber card) | Re-runs a request up to N times with exponential back-off until a condition passes |
+| **Set Variable** (dark indigo card) | Writes values into variables mid-flow without an HTTP request |
 | **Debug** (blue-grey card) | Runs a JS snippet for inspection; always a pass-through |
 | **Delay** (amber card) | Pauses for a configurable number of milliseconds |
 | **For Each** (indigo card) | Iterates over an array, running a sub-sequence per item |
@@ -284,7 +291,7 @@ The Collection Runner lets you chain multiple requests together into a visual fl
 #### Building the flow
 
 - **+ Add Request** — searchable dropdown; new nodes appear at the centre of the visible canvas.
-- **+ Nodes ▾** — dropdown to add a **Debug Script**, **Delay**, or **For Each** node.
+- **+ Nodes ▾** — dropdown to add a **Debug Script**, **Delay**, **For Each**, **Retry Request**, or **Set Variable** node.
 - **Connect nodes** by dragging from a bottom handle to a top handle.
 - **Reconnect an edge** by dragging either of its endpoints to a new node.
 - **Delete a node** by hovering it and clicking the red **✕** — the node and all its edges are removed (with confirmation).
@@ -336,13 +343,38 @@ Configure an **array source** and an **item variable prefix** (`item`). The arra
 
 Each item's fields are available as `{{item.fieldName}}` (dot notation) or `{{item_fieldName}}` (underscore). Both work in URLs, headers, and bodies. The node has two source handles: **body** (bottom-left, per-item sequence) and **done** (bottom-right, after all items).
 
+#### Retry node
+
+Click the node to configure the request to retry, max attempts (default 3), initial delay (default 1 000 ms), backoff multiplier (default 2×), and an optional stop condition:
+
+```javascript
+return body.status === 'complete';  // stop when job is ready
+return status < 500;                // stop on any non-5xx
+```
+
+Leave the condition blank to stop on any 2xx/3xx response.
+
+#### Set Variable node
+
+Add one or more `variable = expression` rows. Expressions are evaluated as JavaScript with `variables` in scope; `{{var}}` template substitution is used as a fallback:
+
+```javascript
+variables.baseUrl + '/api/v2'    // concatenate
+'Bearer ' + variables.token      // build a header value
+variables.userId.toLowerCase()   // normalise
+```
+
+#### Run history
+
+Every completed run is saved automatically. Click the **History** toolbar button to open the run history panel — each entry shows status, time, duration, and a node summary. Click a row to expand its execution log for comparison or debugging.
+
 #### Saving and reverting
 
 - **Save** to persist changes. Rename via the sidebar **···** menu on the runner item.
 - **Revert** to discard unsaved changes and restore the last saved version.
 - **Export / Import** runner state as `.runner.json` for sharing or backup.
 
-Runner files are committed to git alongside collections (`{workspace}/runners/`). See [Collection Runner guide](docs/collection-runner.md) for full documentation.
+Runner definitions are committed to git (`{workspace}/runners/`); run history is stored locally only (`{workspace}/runner-history/`). See [Collection Runner guide](docs/collection-runner.md) for full documentation.
 
 ### Importing
 
@@ -482,7 +514,7 @@ aWRnaXRzIFB0eSBMdGQwHhcNMjMwNjE5MTQwNDM5WhcNMjQwNjE4MTQwNDM5WjBF
 
 - All workspaces share a single git repository at the workspaces root directory
 - The repo is initialized automatically when the first workspace is created (or skipped if one already exists, e.g. from a clone)
-- A `.gitignore` at the workspaces root is automatically maintained to exclude `*.secrets.json`, `*.local.json`, `saved-responses/`, `.DS_Store`, and `node_modules/`
+- A `.gitignore` at the workspaces root is automatically maintained to exclude `*.secrets.json`, `*.local.json`, `saved-responses/`, `runner-history/`, `.DS_Store`, and `node_modules/`
 - Collections and environments are saved as JSON files within each workspace subdirectory
 - Variables and form parameters marked as secret are automatically split into `.secrets.json` files
 - See [Workspaces & Secrets Guide](docs/workspaces-and-secrets.md) for details
@@ -511,7 +543,9 @@ npm run dist         # Create distributable packages
     - ✅ **Find (in request and response)** - Press `Ctrl+F` / `Cmd+F` to search across all request and response content with regex support
     - ✅ **Configurable Shortcut keys for UI** - Customizable keyboard shortcuts including Send request (`Cmd+Enter`/`Ctrl+Enter`), configurable in Settings
     - ✅ **Image support in Response (Binary Data)** - View images directly in response panel with download and zoom controls
-- ✅ **Collection Runner** - Visual flow-based runner: Request / Debug / Delay / For Each nodes, JavaScript conditions, dot-notation variable access, data mappings, edge output expressions, execution log, Start-node variable overrides, inline request+response inspection
+    - ✅ **Test results panel** - Tests tab surfaces `pm.test()` pass/fail results with per-test error details and badge
+    - ✅ **Code generation** - `</> Code` button generates cURL, JavaScript fetch, and Python `requests` snippets with variables and auth resolved
+- ✅ **Collection Runner** - Visual flow-based runner: Request / Retry / Set Variable / Debug / Delay / For Each nodes, JavaScript conditions, dot-notation variable access, data mappings, edge output expressions, execution log, run history panel, Start-node variable overrides, inline request+response inspection
 
 🚧 **Planned:**
 - Collection export (Postman v2, OpenAPI)

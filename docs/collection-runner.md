@@ -30,11 +30,12 @@ The canvas fills the full panel area when a runner is active. It contains:
 | **▶ Run** | Execute the flow |
 | **⏹ Stop** | Abort a run in progress — appears next to **Running…** while executing |
 | **+ Add Request** | Searchable dropdown — pick any request from the collection |
-| **+ Nodes ▾** | Dropdown to add a **Debug Script**, **Delay**, or **For Each** node |
+| **+ Nodes ▾** | Dropdown to add a **Debug Script**, **Delay**, **For Each**, **Retry Request**, or **Set Variable** node |
 | **Save** | Persist current state to disk |
 | **Revert** | Discard unsaved changes and reload the last saved version |
 | **Export** | Download runner as `.runner.json` |
 | **Import** | Load a runner from a `.runner.json` file |
+| **History** | Toggle the run history panel (badge shows saved run count) |
 | **Log** | Toggle the execution log panel (badge shows entry count) |
 
 ### Node types
@@ -43,6 +44,8 @@ The canvas fills the full panel area when a runner is active. It contains:
 |------|-----------|---------|
 | **Start** | Green circle | Entry point — every run begins here; click to set variable overrides |
 | **Request** | Dark card | Executes one API request from the collection |
+| **Retry** | Amber card | Re-runs a request up to N times with exponential back-off until a condition passes |
+| **Set Variable** | Indigo-dark card | Writes values into variables mid-flow without an HTTP request |
 | **Debug** | Blue-grey card | Runs a JavaScript snippet for inspection; always a pass-through |
 | **Delay** | Amber card | Pauses execution for a configurable number of milliseconds |
 | **For Each** | Indigo card | Iterates over an array, running a sub-sequence per item |
@@ -105,6 +108,45 @@ Each entry is prefixed with an elapsed time (e.g. `+0.387s`) measured from when 
 You can call `console.log(...)` inside any script or condition and the output appears in the log as a teal entry.
 
 Click **Download** to save the current log as a CSV file (`elapsed_s`, `level`, `message` columns). Click **Clear** to empty the log, or **✕** to collapse the panel. The **Log** toolbar button shows a badge with the entry count.
+
+## Run History
+
+Every completed run (including stopped and failed runs) is automatically saved to disk. Click the **History** toolbar button to open the Run History panel. The badge on the button shows how many runs are stored.
+
+### History panel
+
+Each row shows:
+
+| Column | Description |
+|--------|-------------|
+| Status icon | `✓` success · `✗` error · `⏹` aborted |
+| Time | Wall-clock time the run started |
+| Duration | Total elapsed time |
+| Summary | Node count and error count |
+
+Click any row to expand its **execution log** inline — the same colour-coded, timestamped entries that appear in the live log panel during a run.
+
+Click **Clear** to remove all history entries from the panel (does not affect runs in progress).
+
+### Persistence
+
+Run history is stored separately from runner definitions:
+
+```
+{workspaces}/
+└── {workspace-id}/
+    └── runner-history/
+        └── {runner-id}/
+            └── {run-id}.json
+```
+
+Each file contains the full log, all node results, and timing metadata. Up to **50 runs** are loaded per runner session; older entries remain on disk and are not deleted automatically.
+
+### Use cases
+
+- Compare the logs of a passing run against a failing one
+- Confirm that a recently deployed endpoint now returns a 200 where it previously returned a 503
+- Review how long each step took across multiple runs to spot performance regressions
 
 ## Start Node — Variable Overrides
 
@@ -278,6 +320,85 @@ Click **+ Nodes ▾ → Delay** to add a Delay node, then click the node to set 
 
 **Use cases:** rate limiting, waiting for a background job to process before polling.
 
+## Retry Node
+
+Click **+ Nodes ▾ → Retry Request** to add a Retry node, then click it to configure:
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| Request to retry | Any request from the collection | — |
+| Max attempts | Maximum number of tries | `3` |
+| Initial delay (ms) | Wait before the second attempt | `1000` |
+| Backoff × | Multiplier applied to the delay on each retry | `2` |
+| Stop condition | JavaScript returning `true` when the result is satisfactory | 2xx status |
+
+#### Back-off schedule
+
+With initial delay `1000` and multiplier `2`:
+
+| Attempt | Wait before this attempt |
+|---------|--------------------------|
+| 1 | — (immediate) |
+| 2 | 1 000 ms |
+| 3 | 2 000 ms |
+| 4 | 4 000 ms |
+
+#### Stop condition script
+
+Leave blank to stop on any 2xx/3xx response. Otherwise write JavaScript that returns `true` when the result is acceptable:
+
+```javascript
+// Stop when a background job is ready:
+return body.status === 'complete';
+
+// Stop when a specific field appears:
+return body.token !== undefined;
+
+// Stop on any non-5xx status:
+return status < 500;
+```
+
+**Available identifiers:** `response`, `body`, `status`, `headers`, `variables` — identical to condition scripts on edges.
+
+The node always continues to the next connected node after all attempts, regardless of outcome. If the condition was never satisfied, the node is marked with a red `✗` badge but the flow proceeds.
+
+**Use cases:** polling a job status endpoint, waiting for an async webhook to process, retrying flaky endpoints with rate-limit back-off.
+
+## Set Variable Node
+
+Click **+ Nodes ▾ → Set Variable** to add a Set Variable node, then click it to configure one or more assignments:
+
+| Field | Description |
+|-------|-------------|
+| Variable name | The variable to create or overwrite |
+| Expression | A JavaScript expression or `{{var}}` template |
+
+#### Expression evaluation
+
+Each expression is first evaluated as JavaScript with `variables` in scope. If evaluation fails (syntax error or exception) the expression is treated as a literal string with `{{var}}` substitution applied.
+
+```javascript
+// Concatenate a base URL with a path:
+variables.baseUrl + '/api/v2/users'
+
+// Build a Bearer header value:
+'Bearer ' + variables.access_token
+
+// Derive a value from a mapped variable:
+variables.userId.trim().toLowerCase()
+
+// Static string (no JS needed):
+production
+```
+
+After the node executes, all downstream nodes see the updated variables.
+
+**Use cases:**
+- Construct a derived URL or header value from parts
+- Normalise a value (trim, lowercase) before using it in a request
+- Combine two mapped fields into a single variable
+- Set a sentinel value to control conditional branching downstream
+
 ## For Each Node
 
 Click **+ Nodes ▾ → For Each** in the toolbar to add a For Each node, then click it to configure:
@@ -374,13 +495,18 @@ After running, check the execution log for script output and mapped values, then
 ```
 {workspaces}/
 └── {workspace-id}/
-    └── runners/
-        └── {runner-id}.json
+    ├── runners/
+    │   └── {runner-id}.json          ← runner definition (nodes, edges, config)
+    └── runner-history/
+        └── {runner-id}/
+            └── {run-id}.json         ← one file per completed run
 ```
 
-Each file is a self-contained JSON object with `nodes`, `edges`, `name`, `collectionId`, and timestamps. Runner files are committed to git (not gitignored).
+Runner definition files are self-contained JSON with `nodes`, `edges`, `name`, `collectionId`, and timestamps. They are committed to git (not gitignored).
+
+Run history files are also stored on disk but are not tracked by git (they are added to `.gitignore` automatically).
 
 ## Limitations
 
-- **Branching flows only** — no loop-back edges or parallel execution.
+- **Branching flows only** — no loop-back edges (use the **Retry** node for polling/retry patterns) or parallel execution.
 - **One collection per runner** — all request nodes must come from the runner's parent collection.
