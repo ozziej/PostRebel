@@ -103,6 +103,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return () => document.removeEventListener('click', close);
   }, [openMenuId]);
 
+  // Calculate approximate menu height based on menu type
+  const getMenuHeight = (menuId: string): number => {
+    const menuItemHeight = 40; // Approximate height per menu item (padding + font size)
+    const dividerHeight = 5; // Height of MenuDivider
+
+    if (menuId.startsWith('col-')) {
+      // Collection menu: Add Folder, Rename, Edit Authentication, Divider, Delete
+      return menuItemHeight * 4 + dividerHeight;
+    } else if (menuId.startsWith('req-') || menuId.startsWith('runner-')) {
+      // Request/Runner menu: Rename, Duplicate, Divider, Delete
+      return menuItemHeight * 3 + dividerHeight;
+    }
+
+    // Default fallback
+    return menuItemHeight * 3 + dividerHeight;
+  };
+
   // Open a context menu anchored to the button that triggered it
   const openMenu = (e: React.MouseEvent, menuId: string) => {
     e.stopPropagation();
@@ -111,7 +128,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setMenuPos(null);
     } else {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      setMenuPos({ top: rect.bottom + 2, right: window.innerWidth - rect.right });
+      const menuHeight = getMenuHeight(menuId);
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+
+      // Position above if there's not enough space below and more space above
+      const shouldPositionAbove = spaceBelow < menuHeight + 10 && spaceAbove > spaceBelow;
+
+      const top = shouldPositionAbove
+        ? rect.top - menuHeight - 2
+        : rect.bottom + 2;
+
+      setMenuPos({ top, right: window.innerWidth - rect.right });
       setOpenMenuId(menuId);
     }
   };
