@@ -182,22 +182,8 @@ export const VariableInput: React.FC<VariableInputProps> = ({
     });
   }, [autocomplete, value, onChange]);
 
-  const getVariableAtPosition = (mouseX: number): { name: string; startX: number; endX: number } | null => {
+  const getVariableAtPosition = (mouseX: number, mouseY: number): { name: string; startX: number; endX: number } | null => {
     if (!inputRef.current || !measureRef.current) return null;
-
-    const variableRegex = /\{\{(\w+)\}\}/g;
-    let match;
-    const variables: Array<{ name: string; start: number; end: number }> = [];
-
-    while ((match = variableRegex.exec(value)) !== null) {
-      variables.push({
-        name: match[1],
-        start: match.index,
-        end: match.index + match[0].length
-      });
-    }
-
-    if (variables.length === 0) return null;
 
     const input = inputRef.current;
     const computedStyle = window.getComputedStyle(input);
@@ -209,15 +195,35 @@ export const VariableInput: React.FC<VariableInputProps> = ({
 
     const scrollLeft = input.scrollLeft || 0;
 
-    for (const variable of variables) {
-      span.textContent = value.substring(0, variable.start);
+    // For multiline bodies, restrict the search to the single line under the
+    // cursor and measure offsets relative to that line's own text. Measuring
+    // against the whole value (which contains embedded newlines) collapses the
+    // "pre" span's shrink-to-fit width to the widest line, so pixel ranges for
+    // later variables overlap earlier ones and the wrong match gets returned.
+    let lineText = value;
+    if (multiline) {
+      const scrollTop = (input as HTMLTextAreaElement).scrollTop || 0;
+      const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
+      const lineHeight = parseFloat(computedStyle.lineHeight) || parseFloat(computedStyle.fontSize) * 1.2;
+      const lines = value.split('\n');
+      const lineIndex = Math.max(0, Math.min(lines.length - 1, Math.floor((mouseY + scrollTop - paddingTop) / lineHeight)));
+      lineText = lines[lineIndex];
+    }
+
+    const variableRegex = /\{\{(\w+)\}\}/g;
+    let match;
+    while ((match = variableRegex.exec(lineText)) !== null) {
+      const start = match.index;
+      const end = match.index + match[0].length;
+
+      span.textContent = lineText.substring(0, start);
       const startX = span.offsetWidth - scrollLeft;
 
-      span.textContent = value.substring(0, variable.end);
+      span.textContent = lineText.substring(0, end);
       const endX = span.offsetWidth - scrollLeft;
 
       if (mouseX >= startX && mouseX <= endX) {
-        return { name: variable.name, startX, endX };
+        return { name: match[1], startX, endX };
       }
     }
 
@@ -232,10 +238,11 @@ export const VariableInput: React.FC<VariableInputProps> = ({
 
     const rect = inputRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
     const paddingLeft = parseFloat(window.getComputedStyle(inputRef.current).paddingLeft) || 0;
     const adjustedMouseX = mouseX - paddingLeft;
 
-    const variable = getVariableAtPosition(adjustedMouseX);
+    const variable = getVariableAtPosition(adjustedMouseX, mouseY);
 
     if (variable) {
       const varValue = environment.variables[variable.name];

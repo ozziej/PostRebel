@@ -13,3 +13,4 @@ certificates/
 # Secrets - never commit these!
 *.secrets.json
 workspaces/**/secrets/
+.claude
