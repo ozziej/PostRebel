@@ -13,27 +13,54 @@ function generateId(): string {
   return `${Date.now()}-${++_idCounter}-${Math.random().toString(36).substr(2, 5)}`;
 }
 
-function generateExampleFromSchema(schema: any, spec: any, depth: number = 0): any {
-  if (depth > 3 || !schema) return null;
+const MAX_SCHEMA_DEPTH = 8;
 
-  // Resolve $ref
+function generateExampleFromSchema(
+  schema: any,
+  spec: any,
+  depth: number = 0,
+  seenRefs: ReadonlySet<string> = new Set()
+): any {
+  if (depth > MAX_SCHEMA_DEPTH || !schema) return null;
+
+  // Resolve $ref. Cycle protection is tracked per-path via seenRefs rather than
+  // consuming the structural depth budget, so unrelated sibling refs (e.g. the
+  // same UserDetail used in two different fields) aren't falsely truncated.
   if (schema.$ref) {
     const ref: string = schema.$ref;
+    if (seenRefs.has(ref)) return null;
     const parts = ref.replace(/^#\//, '').split('/');
     let resolved: any = spec;
     for (const part of parts) {
       resolved = resolved?.[part];
     }
     if (!resolved) return null;
-    return generateExampleFromSchema(resolved, spec, depth + 1);
+    const nextSeen = new Set(seenRefs);
+    nextSeen.add(ref);
+    return generateExampleFromSchema(resolved, spec, depth, nextSeen);
   }
 
   if (schema.example !== undefined) return schema.example;
 
-  // Use first schema from combiners
-  if (schema.allOf) return generateExampleFromSchema(schema.allOf[0], spec, depth);
-  if (schema.oneOf) return generateExampleFromSchema(schema.oneOf[0], spec, depth);
-  if (schema.anyOf) return generateExampleFromSchema(schema.anyOf[0], spec, depth);
+  // allOf: merge all member schemas (common for schema composition/inheritance).
+  if (schema.allOf) {
+    const merged: Record<string, any> = {};
+    let anyObject = false;
+    let fallback: any = null;
+    for (const sub of schema.allOf) {
+      const value = generateExampleFromSchema(sub, spec, depth + 1, seenRefs);
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        Object.assign(merged, value);
+        anyObject = true;
+      } else if (fallback === null && value !== null) {
+        fallback = value;
+      }
+    }
+    return anyObject ? merged : fallback;
+  }
+  // oneOf/anyOf are alternatives, not composed parts - take the first.
+  if (schema.oneOf) return generateExampleFromSchema(schema.oneOf[0], spec, depth + 1, seenRefs);
+  if (schema.anyOf) return generateExampleFromSchema(schema.anyOf[0], spec, depth + 1, seenRefs);
 
   switch (schema.type) {
     case 'string':
@@ -45,13 +72,13 @@ function generateExampleFromSchema(schema: any, spec: any, depth: number = 0): a
     case 'boolean':
       return true;
     case 'array':
-      if (depth >= 3) return [];
-      return [generateExampleFromSchema(schema.items || {}, spec, depth + 1)];
+      if (depth >= MAX_SCHEMA_DEPTH) return [];
+      return [generateExampleFromSchema(schema.items || {}, spec, depth + 1, seenRefs)];
     case 'object': {
       const result: Record<string, any> = {};
       if (schema.properties) {
         for (const [key, propSchema] of Object.entries(schema.properties)) {
-          result[key] = generateExampleFromSchema(propSchema as any, spec, depth + 1);
+          result[key] = generateExampleFromSchema(propSchema as any, spec, depth + 1, seenRefs);
         }
       }
       return result;
@@ -172,7 +199,7 @@ export function importOpenApi(input: string): OpenApiImportResult {
         }
       }
 
-      // Query params (required only)
+      // Query and header params (required only)
       const pathLevelParams: any[] = pathItemObj.parameters || [];
       const opLevelParams: any[] = operation.parameters || [];
       const allParams = [...pathLevelParams, ...opLevelParams];
@@ -180,6 +207,8 @@ export function importOpenApi(input: string): OpenApiImportResult {
       for (const param of allParams) {
         if (param.in === 'query' && param.required) {
           queryParts.push(`${param.name}={{${param.name}}}`);
+        } else if (param.in === 'header' && param.required) {
+          headers[param.name] = `{{${param.name}}}`;
         }
       }
       const urlWithQuery = queryParts.length > 0 ? `${fullUrl}?${queryParts.join('&')}` : fullUrl;

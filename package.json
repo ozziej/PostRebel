@@ -1,6 +1,6 @@
 {
   "name": "postrebel",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Local API testing tool with git support",
   "author": "James Ostrowick <james@ostrowick.co.za>",
   "main": "dist/electron/main.js",
@@ -14,7 +14,8 @@
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:win": "npm run build && electron-builder --win",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist:linux": "npm run build && electron-builder --linux",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
@@ -29,6 +30,7 @@
     "style-loader": "^4.0.0",
     "ts-loader": "^9.5.7",
     "typescript": "^6.0.3",
+    "vitest": "^4.1.10",
     "wait-on": "^9.0.5",
     "webpack": "^5.106.2",
     "webpack-cli": "^7.0.2",
