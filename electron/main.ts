@@ -703,6 +703,14 @@ ipcMain.handle('load-environments', async (event, workspaceId) => {
           // No secrets file, continue
         }
 
+        // Sync variablesArray → variables so legacy consumers (httpService, VariableInput, etc.) see values
+        if (environment.variablesArray) {
+          environment.variables = {};
+          environment.variablesArray.forEach((v: any) => {
+            environment.variables[v.key] = v.value;
+          });
+        }
+
         environments.push(environment);
       }
     }

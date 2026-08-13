@@ -53,6 +53,7 @@ interface SidebarProps {
   onRenameRunner: (runnerId: string, newName: string) => void;
   onDuplicateRunner: (runner: Runner) => void;
   onAddRunner: (collection: Collection) => void;
+  onCopyToWorkspace: (request: ApiRequest) => void;
 }
 
 interface DragItem {
@@ -89,6 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRenameRunner,
   onDuplicateRunner,
   onAddRunner,
+  onCopyToWorkspace,
 }) => {
   const [addDropdownOpenId, setAddDropdownOpenId] = useState<string | null>(null);
   const [editingRunner, setEditingRunner] = useState<string | null>(null);
@@ -992,6 +994,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                           <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
                                             <MenuItem icon="✏️" label="Rename" onClick={() => startEditingRequest(request)} />
                                             <MenuItem icon="⿻" label="Duplicate" onClick={() => duplicateRequest(collection, request, folder.id)} />
+                                            <MenuItem icon="→" label="Copy to Workspace" onClick={() => { setOpenMenuId(null); onCopyToWorkspace(request); }} />
                                             <MenuDivider />
                                             <MenuItem icon="🗑️" label="Delete" onClick={() => deleteRequest(collection, request.id, request.name)} destructive />
                                           </div>
@@ -1113,6 +1116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
                                   <MenuItem icon="✏️" label="Rename" onClick={() => startEditingRequest(request)} />
                                   <MenuItem icon="⿻" label="Duplicate" onClick={() => duplicateRequest(collection, request)} />
+                                  <MenuItem icon="→" label="Copy to Workspace" onClick={() => { setOpenMenuId(null); onCopyToWorkspace(request); }} />
                                   <MenuDivider />
                                   <MenuItem icon="🗑️" label="Delete" onClick={() => deleteRequest(collection, request.id, request.name)} destructive />
                                 </div>

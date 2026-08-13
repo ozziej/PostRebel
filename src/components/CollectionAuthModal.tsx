@@ -31,14 +31,37 @@ export const CollectionAuthModal: React.FC<CollectionAuthModalProps> = ({
 
   if (!isOpen || !collection) return null;
 
+  const buildUpdatedCollection = () => ({
+    ...collection,
+    auth: authConfig?.type === 'none' ? undefined : authConfig,
+  });
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const updatedCollection = {
-        ...collection,
-        auth: authConfig?.type === 'none' ? undefined : authConfig
+      await onSave(buildUpdatedCollection());
+      onClose();
+    } catch (error) {
+      console.error('Failed to save collection auth:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveAndApplyAll = async () => {
+    setIsSaving(true);
+    try {
+      const inherit = { type: 'inherit' as const };
+      const base = buildUpdatedCollection();
+      const withInherit = {
+        ...base,
+        requests: base.requests.map(r => ({ ...r, auth: inherit })),
+        folders: base.folders?.map(f => ({
+          ...f,
+          requests: f.requests.map(r => ({ ...r, auth: inherit })),
+        })),
       };
-      await onSave(updatedCollection);
+      await onSave(withInherit);
       onClose();
     } catch (error) {
       console.error('Failed to save collection auth:', error);
@@ -307,6 +330,23 @@ export const CollectionAuthModal: React.FC<CollectionAuthModalProps> = ({
             }}
           >
             Cancel
+          </button>
+          <button
+            onClick={handleSaveAndApplyAll}
+            disabled={isSaving}
+            title="Save collection auth and set every request in this collection to 'Inherit from Collection'"
+            style={{
+              padding: '0.75rem 1.5rem',
+              fontSize: '0.9rem',
+              border: '1px solid #10b981',
+              borderRadius: '0.375rem',
+              backgroundColor: 'transparent',
+              color: '#10b981',
+              cursor: isSaving ? 'not-allowed' : 'pointer',
+              opacity: isSaving ? 0.6 : 1
+            }}
+          >
+            {isSaving ? 'Saving...' : 'Save & Apply to All'}
           </button>
           <button
             onClick={handleSave}

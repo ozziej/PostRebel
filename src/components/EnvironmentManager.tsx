@@ -348,7 +348,7 @@ export const EnvironmentManager: React.FC<EnvironmentManagerProps> = ({
                           fontSize: '0.85rem',
                           color: '#888'
                         }}>
-                          {Object.keys(environment.variables).length} variable{Object.keys(environment.variables).length !== 1 ? 's' : ''}
+                          {(environment.variablesArray?.length ?? Object.keys(environment.variables).length)} variable{(environment.variablesArray?.length ?? Object.keys(environment.variables).length) !== 1 ? 's' : ''}
                         </div>
                       </div>
                     </div>

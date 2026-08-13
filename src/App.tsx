@@ -13,6 +13,7 @@ import { EnvironmentDiff } from './components/EnvironmentDiff';
 import { WorkspaceManager } from './components/WorkspaceManager';
 import { SettingsModal } from './components/SettingsModal';
 import { ImportModal, ImportTab } from './components/ImportModal';
+import { CopyToWorkspaceModal } from './components/CopyToWorkspaceModal';
 import { SearchBar, SearchOptions } from './components/SearchBar';
 import { DEFAULT_SHORTCUTS, KeyboardShortcut, matchesShortcut } from './utils/keyboardShortcuts';
 import { HttpService } from './utils/httpService';
@@ -43,6 +44,7 @@ function App() {
   const [importModalTab, setImportModalTab] = useState<ImportTab>('collection');
   const [showCollectionAuthModal, setShowCollectionAuthModal] = useState(false);
   const [editingCollectionAuth, setEditingCollectionAuth] = useState<Collection | null>(null);
+  const [copyToWorkspaceRequest, setCopyToWorkspaceRequest] = useState<ApiRequest | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [requestHistory, setRequestHistory] = useState<RequestHistoryEntry[]>([]);
   const [savedResponses, setSavedResponses] = useState<SavedResponse[]>([]);
@@ -895,6 +897,7 @@ function App() {
             onRenameRunner={handleRenameRunner}
             onDuplicateRunner={handleDuplicateRunner}
             onAddRunner={handleAddRunner}
+            onCopyToWorkspace={setCopyToWorkspaceRequest}
           />
         </ResizableSidebar>
 
@@ -1011,6 +1014,15 @@ function App() {
         onSave={saveCollection}
         onUpdateVariable={handleUpdateVariable}
       />
+      {copyToWorkspaceRequest && (
+        <CopyToWorkspaceModal
+          request={copyToWorkspaceRequest}
+          sourceWorkspaceId={activeWorkspace?.id}
+          sourceEnvironments={environments}
+          activeEnvironment={activeEnvironment}
+          onClose={() => setCopyToWorkspaceRequest(null)}
+        />
+      )}
     </div>
   );
 }
