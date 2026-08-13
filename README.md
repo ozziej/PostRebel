@@ -11,6 +11,7 @@ A local API testing tool with git support - your Postman alternative.
 - Make API calls (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)
 - Authentication support (Bearer, Basic, JWT)
 - Variable templating with `{{variable}}` syntax
+- **Dynamic / predefined variables** — built-in variables like `{{randomUuid}}`, `{{currentISODate}}`, `{{randomSAIDNumber}}` and Postman-compatible aliases (`{{$guid}}`, `{{$timestamp}}`, `{{$randomInt}}` etc.) — resolved fresh on every request with no environment setup required
 - Pre-request and test scripts with Postman-compatible `pm` object
 - Local file storage with git support
 - **Environment management** — create, rename, duplicate (📋), and delete environments; edit variables with sort (↕) and bulk-edit; side-by-side diff between any two environments with one-click copy of values from left to right
@@ -23,10 +24,12 @@ A local API testing tool with git support - your Postman alternative.
 - **Response syntax highlighting** - JSON and XML responses are colour-coded with distinct colours for keys, string values, numbers, booleans, tag names, and attributes
 - **Drag and drop** - Reorder requests and folders in the sidebar by dragging; drag requests between folders to move them
 - **Workspace management** - Organize projects into separate workspaces with a shared git repo at the workspaces root directory
+- **Copy request to workspace** — right-click any request (`···` menu → Copy to Workspace) to copy it and its referenced `{{variables}}` to another workspace in one step
 - **Secrets management** - Mark variables and form parameters as secret; secrets are automatically split into `.secrets.json` files and gitignored; secret variable values are masked as `••••••••` in runner execution logs and CSV exports
 - **Request history** - Per-request execution log showing status, timing, and size; persisted per workspace and auto-pruned to a configurable maximum
 - **Saved responses** - Snapshot and name any response for future reference; saved responses are listed under their parent request in the sidebar
 - **Collection folders** - Group requests inside a collection; add folders manually or have them created automatically on OpenAPI import (one folder per tag); drag and drop to reorder and move requests between folders
+- **Collection authentication** — set Bearer, Basic, or JWT auth once at the collection level; individual requests inherit it with "Inherit from Collection"; **Save & Apply to All** button sets every request in the collection to inherit in one click
 - **Copy response** - Copy the full formatted response body to the clipboard with one click (📋 Copy button)
 - **Find in request/response** - `Cmd+F` / `Ctrl+F` searches across all request and response content with plain text, case-sensitive, whole-word, and regex modes
 - **Keyboard shortcuts** - Configurable shortcuts for common actions (Send: `Cmd+Enter` / `Ctrl+Enter`); customise in Settings
@@ -246,6 +249,46 @@ Use `{{variable_name}}` in:
 - URLs: `https://{{api_base}}/users`
 - Headers: `Authorization: Bearer {{token}}`
 - Request bodies: `{"api_key": "{{api_key}}"}`
+
+### Dynamic Variables
+
+PostRebel includes built-in variables that generate fresh values on every request — no environment setup required. Type `{{` in any field to see them in the autocomplete (marked with ⚡).
+
+#### PostRebel native names
+
+| Variable | Output example |
+|---|---|
+| `{{randomUuid}}` | `550e8400-e29b-41d4-a716-446655440000` |
+| `{{currentISODateTimeWithTZ}}` | `2026-08-13T08:20:04.123Z` |
+| `{{currentISODateTimeWithoutTZ}}` | `2026-08-13T08:20:04` |
+| `{{currentISODate}}` | `2026-08-13` |
+| `{{currentISOTime}}` | `08:20:04` |
+| `{{currentUnixTimestampMs}}` | `1723543204123` |
+| `{{randomInt}}` | `742` |
+| `{{randomBoolean}}` | `true` |
+| `{{randomFloat}}` | `742.18` |
+| `{{randomEmail}}` | `user83421@example.com` |
+| `{{randomFirstName}}` | `Sarah` |
+| `{{randomLastName}}` | `Dlamini` |
+| `{{randomFullName}}` | `Sarah Dlamini` |
+| `{{randomSAIDNumber}}` | `8001015009087` (valid Luhn-checked 13-digit SA ID) |
+
+#### Postman-compatible aliases
+
+Collections imported from Postman use `$`-prefixed variables — these resolve automatically with no changes needed after import.
+
+| Postman variable | Equivalent |
+|---|---|
+| `{{$guid}}` | `{{randomUuid}}` |
+| `{{$isoTimestamp}}` | `{{currentISODateTimeWithTZ}}` |
+| `{{$timestamp}}` | Unix timestamp in seconds |
+| `{{$randomInt}}` | `{{randomInt}}` |
+| `{{$randomBoolean}}` | `{{randomBoolean}}` |
+| `{{$randomFloat}}` | `{{randomFloat}}` |
+| `{{$randomEmail}}` | `{{randomEmail}}` |
+| `{{$randomFirstName}}` | `{{randomFirstName}}` |
+| `{{$randomLastName}}` | `{{randomLastName}}` |
+| `{{$randomFullName}}` | `{{randomFullName}}` |
 
 ### Scripts
 
@@ -553,6 +596,7 @@ npm run dist         # Create distributable packages
 - Workspace templates
 - Encrypted secrets storage
 - Plugin system
+- Parameterised dynamic variables e.g. `{{randomInt(1,100)}}`
 
 ## Contributing
 

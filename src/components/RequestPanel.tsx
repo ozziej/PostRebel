@@ -113,7 +113,8 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
     debounceRef.current = setTimeout(() => {
       // Replace {{variables}} with placeholder strings before validating.
       // Also consume surrounding quotes if present, so "{{var}}" doesn't become ""__placeholder__""
-      const sanitized = rawBody.replace(/"?\{\{\w+\}\}"?/g, '"__placeholder__"');
+      // Pattern includes $ to handle Postman-compat dynamic vars like {{$guid}}, {{$timestamp}}
+      const sanitized = rawBody.replace(/"?\{\{[\w.$]+\}\}"?/g, '"__placeholder__"');
 
       try {
         jsonlint.parse(sanitized);

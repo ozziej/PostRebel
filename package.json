@@ -1,6 +1,6 @@
 {
   "name": "postrebel",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Local API testing tool with git support",
   "author": "James Ostrowick <james@ostrowick.co.za>",
   "main": "dist/electron/main.js",

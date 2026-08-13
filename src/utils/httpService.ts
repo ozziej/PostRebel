@@ -1,8 +1,11 @@
 import { ApiRequest, ApiResponse, Environment, Certificate, Collection } from '../types';
+import { resolveDynamicVariable } from './dynamicVariables';
 
 export class HttpService {
   private static replaceVariables(text: string, environment: Environment): string {
-    return text.replace(/\{\{([\w.]+)\}\}/g, (match, varName) => {
+    return text.replace(/\{\{([\w.$]+)\}\}/g, (match, varName) => {
+      const dynamic = resolveDynamicVariable(varName);
+      if (dynamic !== null) return dynamic;
       const dot = varName.indexOf('.');
       if (dot === -1) return environment.variables[varName] || match;
       // Dot notation: {{item.userId}} → look up "item" as JSON, then navigate ".userId"

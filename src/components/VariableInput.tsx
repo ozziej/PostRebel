@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Environment } from '../types';
+import { DYNAMIC_VAR_NAMES_PRIMARY, DYNAMIC_VAR_NAMES_POSTMAN, resolveDynamicVariable } from '../utils/dynamicVariables';
 
 interface VariableInputProps {
   value: string;
@@ -129,13 +130,15 @@ export const VariableInput: React.FC<VariableInputProps> = ({
     }
 
     const query = between;
-    // Don't show if query contains characters that can't be in variable names (except empty)
-    if (/[^a-zA-Z0-9_]/.test(query)) {
+    // Don't show if query contains characters that can't be in variable names ($ is allowed for Postman-compat vars)
+    if (/[^a-zA-Z0-9_$]/.test(query)) {
       setAutocomplete(null);
       return;
     }
 
-    const allVarNames = Object.keys(environment.variables);
+    const envVarNames = Object.keys(environment.variables);
+    const dynamicNames = [...DYNAMIC_VAR_NAMES_PRIMARY, ...DYNAMIC_VAR_NAMES_POSTMAN];
+    const allVarNames = [...envVarNames, ...dynamicNames];
     const filtered = query.length === 0
       ? allVarNames
       : allVarNames.filter(name => name.toLowerCase().includes(query.toLowerCase()));
@@ -147,7 +150,7 @@ export const VariableInput: React.FC<VariableInputProps> = ({
 
     // Find insertEnd: the position of `}}` after cursor, or cursor if not present
     const after = inputValue.substring(cursorPos);
-    const closeMatch = after.match(/^(\w*)\}\}/);
+    const closeMatch = after.match(/^([\w$]*)\}\}/);
     const insertEnd = closeMatch
       ? cursorPos + closeMatch[0].length
       : cursorPos;
@@ -561,37 +564,46 @@ export const VariableInput: React.FC<VariableInputProps> = ({
             fontSize: '0.82rem'
           }}
         >
-          {autocomplete.variables.map((varName, i) => (
-            <div
-              key={varName}
-              onMouseEnter={() => setAutocomplete(prev => prev ? { ...prev, selectedIndex: i } : null)}
-              onClick={() => completeVariable(varName)}
-              style={{
-                padding: '0.35rem 0.6rem',
-                cursor: 'pointer',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: '0.8rem',
-                backgroundColor: i === autocomplete.selectedIndex ? '#0d7377' : 'transparent',
-                color: i === autocomplete.selectedIndex ? '#ffffff' : '#cccccc'
-              }}
-            >
-              <span style={{ fontWeight: 600 }}>{varName}</span>
-              {environment && environment.variables[varName] !== undefined && (
+          {autocomplete.variables.map((varName, i) => {
+            const isDynamic = resolveDynamicVariable(varName) !== null;
+            const isSelected = i === autocomplete.selectedIndex;
+            const envValue = environment?.variables[varName];
+            return (
+              <div
+                key={varName}
+                onMouseEnter={() => setAutocomplete(prev => prev ? { ...prev, selectedIndex: i } : null)}
+                onClick={() => completeVariable(varName)}
+                style={{
+                  padding: '0.35rem 0.6rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '0.8rem',
+                  backgroundColor: isSelected ? '#0d7377' : 'transparent',
+                  color: isSelected ? '#ffffff' : '#cccccc',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
+                  {isDynamic && (
+                    <span style={{ fontSize: '0.7rem', opacity: 0.75, flexShrink: 0 }}>⚡</span>
+                  )}
+                  <span style={{ fontWeight: 600 }}>{varName}</span>
+                </div>
                 <span style={{
-                  opacity: 0.6,
+                  opacity: 0.55,
                   fontSize: '0.75rem',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
-                  maxWidth: '150px'
+                  maxWidth: '150px',
+                  flexShrink: 0,
                 }}>
-                  {environment.variables[varName]}
+                  {isDynamic ? 'dynamic' : (envValue !== undefined ? envValue : '')}
                 </span>
-              )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </>

@@ -3,6 +3,7 @@ import {
   Collection, Environment, Certificate, ApiRequest, ApiResponse,
 } from '../types';
 import { HttpService } from './httpService';
+import { resolveDynamicVariable } from './dynamicVariables';
 import { ScriptRunner } from './scriptRunner';
 
 /** Returns '••••••••' for known secret variable names, otherwise the original value. */
@@ -129,7 +130,9 @@ export function evaluateCondition(
 
 function resolveRequest(request: ApiRequest, vars: Record<string, string>): ApiRequest {
   const sub = (text: string): string =>
-    text.replace(/\{\{([\w.]+)\}\}/g, (match, key) => {
+    text.replace(/\{\{([\w.$]+)\}\}/g, (match, key) => {
+      const dynamic = resolveDynamicVariable(key);
+      if (dynamic !== null) return dynamic;
       const dot = key.indexOf('.');
       if (dot === -1) return vars[key] ?? match;
       const root = vars[key.slice(0, dot)];
@@ -601,7 +604,7 @@ async function runSequence(
             value = fn({ ...vars });
           } catch {
             // Fallback: {{var}} template substitution
-            value = expression.replace(/\{\{([\w.]+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
+            value = expression.replace(/\{\{([\w.$]+)\}\}/g, (_, key) => resolveDynamicVariable(key) ?? vars[key] ?? `{{${key}}}`);
           }
           vars[variable.trim()] = value;
           const masked = maskSecret(variable.trim(), value, ctx.secretVarNames);
