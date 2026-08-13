@@ -1,13 +1,16 @@
 import { ApiRequest, Environment, Collection } from '../types';
+import { resolveDynamicVariable } from './dynamicVariables';
 
 /**
  * Substitute {{varName}} placeholders with environment values.
- * Looks up in variablesArray first (where enabled/not-secret), then falls back to variables.
+ * Resolves dynamic variables first, then variablesArray, then legacy variables.
  */
 function substituteVars(text: string, env: Environment | null): string {
   if (!env) return text;
 
-  return text.replace(/\{\{([\w.]+)\}\}/g, (match, varName) => {
+  return text.replace(/\{\{([\w.$]+)\}\}/g, (match, varName) => {
+    const dynamic = resolveDynamicVariable(varName);
+    if (dynamic !== null) return dynamic;
     // Check variablesArray first (with enabled/secret checks)
     if (env.variablesArray) {
       const envVar = env.variablesArray.find(v => v.key === varName);
