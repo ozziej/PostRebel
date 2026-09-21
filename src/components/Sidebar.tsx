@@ -1,5 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { Collection, Environment, ApiRequest, Workspace, SavedResponse, CollectionFolder, Runner } from '../types';
+import { exportPostmanCollection } from '../utils/postmanExporter';
+import { exportOpenApi } from '../utils/openApiExporter';
+import { downloadTextFile } from '../utils/download';
+
+function safeFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'collection';
+}
+
+function exportCollectionAsPostman(collection: Collection): void {
+  const data = JSON.stringify(exportPostmanCollection(collection), null, 2);
+  downloadTextFile(`${safeFileName(collection.name)}.postman_collection.json`, data, 'application/json');
+}
+
+function exportCollectionAsOpenApi(collection: Collection): void {
+  const { spec, errors } = exportOpenApi(collection);
+  if (errors.length > 0) {
+    console.warn('OpenAPI export warnings:', errors);
+  }
+  const data = JSON.stringify(spec, null, 2);
+  downloadTextFile(`${safeFileName(collection.name)}.openapi.json`, data, 'application/json');
+}
 
 // ── Reusable context-menu primitives ──────────────────────────────────────────
 
@@ -111,8 +132,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const dividerHeight = 5; // Height of MenuDivider
 
     if (menuId.startsWith('col-')) {
-      // Collection menu: Add Folder, Rename, Edit Authentication, Divider, Delete
-      return menuItemHeight * 4 + dividerHeight;
+      // Collection menu: Add Folder, Rename, Edit Authentication, Divider, Export (Postman), Export (OpenAPI), Divider, Delete
+      return menuItemHeight * 6 + dividerHeight * 2;
     } else if (menuId.startsWith('req-') || menuId.startsWith('runner-')) {
       // Request/Runner menu: Rename, Duplicate, Divider, Delete
       return menuItemHeight * 3 + dividerHeight;
@@ -826,6 +847,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           }} />
                           <MenuItem icon="✏️" label="Rename" onClick={() => startEditingCollection(collection)} />
                           <MenuItem icon="🔐" label="Edit Authentication" onClick={() => onEditCollectionAuth(collection)} />
+                          <MenuDivider />
+                          <MenuItem icon="⬇️" label="Export (Postman)" onClick={() => { setOpenMenuId(null); exportCollectionAsPostman(collection); }} />
+                          <MenuItem icon="⬇️" label="Export (OpenAPI)" onClick={() => { setOpenMenuId(null); exportCollectionAsOpenApi(collection); }} />
                           <MenuDivider />
                           <MenuItem icon="🗑️" label="Delete" onClick={() => deleteCollection(collection.id, collection.name)} destructive />
                         </div>

@@ -1,5 +1,16 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { Environment } from '../types';
+import { exportPostmanEnvironment } from '../utils/postmanExporter';
+import { downloadTextFile } from '../utils/download';
+
+function safeFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'environment';
+}
+
+function exportEnvironment(environment: Environment): void {
+  const data = JSON.stringify(exportPostmanEnvironment(environment), null, 2);
+  downloadTextFile(`${safeFileName(environment.name)}.postman_environment.json`, data, 'application/json');
+}
 
 interface EnvironmentManagerProps {
   isOpen: boolean;
@@ -312,12 +323,17 @@ export const EnvironmentManager: React.FC<EnvironmentManagerProps> = ({
                 ) : (
                   <div
                     key={environment.id}
+                    onClick={() => onSelectEnvironment(environment)}
+                    title="Click to switch to this environment"
                     style={{
                       backgroundColor: activeEnvironment?.id === environment.id ? '#1a2d2d' : '#404040',
                       border: `1px solid ${activeEnvironment?.id === environment.id ? '#0d7377' : '#555'}`,
                       borderRadius: '4px',
-                      padding: '1rem'
+                      padding: '1rem',
+                      cursor: 'pointer'
                     }}
+                    onMouseEnter={e => { if (activeEnvironment?.id !== environment.id) e.currentTarget.style.backgroundColor = '#4a4a4a'; }}
+                    onMouseLeave={e => { if (activeEnvironment?.id !== environment.id) e.currentTarget.style.backgroundColor = '#404040'; }}
                   >
                     <div style={{
                       display: 'flex',
@@ -354,14 +370,14 @@ export const EnvironmentManager: React.FC<EnvironmentManagerProps> = ({
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
                       <button
-                        onClick={() => {
-                          onSelectEnvironment(environment);
-                          onClose();
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          exportEnvironment(environment);
                         }}
-                        className="button"
-                        style={{ flex: 1 }}
+                        className="button-secondary button"
+                        title="Export environment (Postman)"
                       >
-                        Switch to Environment
+                        ⬇️
                       </button>
                       <button
                         onClick={(e) => {

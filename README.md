@@ -14,12 +14,13 @@ A local API testing tool with git support - your Postman alternative.
 - **Dynamic / predefined variables** — built-in variables like `{{randomUuid}}`, `{{currentISODate}}`, `{{randomSAIDNumber}}` and Postman-compatible aliases (`{{$guid}}`, `{{$timestamp}}`, `{{$randomInt}}` etc.) — resolved fresh on every request with no environment setup required
 - Pre-request and test scripts with Postman-compatible `pm` object
 - Local file storage with git support
-- **Environment management** — create, rename, duplicate (📋), and delete environments; edit variables with sort (↕) and bulk-edit; side-by-side diff between any two environments with one-click copy of values from left to right
+- **Environment management** — create, rename, duplicate (📋), and delete environments; edit variables with sort (↕) and bulk-edit; side-by-side diff between any two environments with one-click copy of values from left to right; click anywhere on an environment's card to switch to it; export (⬇️) any environment as a Postman environment JSON file, with secret variables marked `type: "secret"`
 - Token extraction from responses
 - **Certificate management** - Import custom CA certificates for internal APIs
 - **Postman V2 collection and environment import**
 - **cURL command import**
 - **OpenAPI / Swagger import** - Import OpenAPI 3.x (3.0, 3.1) and Swagger 2.0 specs in JSON or YAML; endpoints are automatically grouped into tag-based folders within the collection
+- **Collection export** - Export any collection as a Postman v2.1 collection or an OpenAPI 3.0 spec from the sidebar's **···** menu
 - **Request body types** - None, Raw (JSON, Text, JavaScript, HTML, XML), x-www-form-urlencoded, form-data, and Binary file upload
 - **Response syntax highlighting** - JSON and XML responses are colour-coded with distinct colours for keys, string values, numbers, booleans, tag names, and attributes
 - **Drag and drop** - Reorder requests and folders in the sidebar by dragging; drag requests between folders to move them
@@ -444,6 +445,17 @@ Paste an OpenAPI 3.x or Swagger 2.0 spec (JSON or YAML). PostRebel will:
 
 You can import into an existing collection (folders will be merged in) or create a new one named after the spec title.
 
+### Exporting
+
+Right-click (or click **···** on) any collection in the sidebar to export it:
+
+- **Export (Postman)** - Downloads a Postman v2.1 collection JSON file (`<name>.postman_collection.json`). Requests, folders, headers, bodies, Bearer/Basic auth, and pre-request/test scripts are converted to Postman's native shapes. `jwt`-type auth is exported as Bearer (Postman has no native JWT auth type); `inherit`-type auth is omitted so the item inherits from its parent, matching Postman's own convention.
+- **Export (OpenAPI)** - Downloads an OpenAPI 3.0 spec JSON file (`<name>.openapi.json`). `{{variable}}` placeholders in the URL path become `{variable}` path parameters, template-valued query/header params become OpenAPI query/header parameters, folders become tags, and Bearer/Basic auth become `securitySchemes`. The most common request host across the collection becomes the spec's `servers` entry.
+
+Both exports round-trip through PostRebel's own importers, but some information is necessarily lossy going the other way — e.g. Postman's arbitrarily nested sub-folders are flattened to one level on import, so a collection with deep nesting won't regain it after an export/import cycle.
+
+Environments have their own export: click **⬇️** on any environment card in the **Environment Manager** to download it as a Postman environment JSON file (`<name>.postman_environment.json`), with secret variables marked `type: "secret"`.
+
 ### Request History
 
 Every time you execute a request, PostRebel records the result (method, resolved URL, status code, response time, and size) in a per-workspace history log.
@@ -589,9 +601,9 @@ npm run dist         # Create distributable packages
     - ✅ **Test results panel** - Tests tab surfaces `pm.test()` pass/fail results with per-test error details and badge
     - ✅ **Code generation** - `</> Code` button generates cURL, JavaScript fetch, and Python `requests` snippets with variables and auth resolved
 - ✅ **Collection Runner** - Visual flow-based runner: Request / Retry / Set Variable / Debug / Delay / For Each nodes, JavaScript conditions, dot-notation variable access, data mappings, edge output expressions, execution log, run history panel, Start-node variable overrides, inline request+response inspection
+- ✅ **Collection export (Postman v2, OpenAPI)** - Export any collection from its **···** menu in the sidebar as a Postman v2.1 collection JSON or an OpenAPI 3.0 spec; auth, headers, bodies, folders (as tags), and `{{variable}}` placeholders (as path/query params) are converted back to each format's native shape
 
 🚧 **Planned:**
-- Collection export (Postman v2, OpenAPI)
 - Import/export workspaces
 - Workspace templates
 - Encrypted secrets storage
