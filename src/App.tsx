@@ -728,11 +728,17 @@ function App() {
     setTestResults([]);
 
     try {
+      const activeCollection = collections.find(c =>
+        c.requests.some(r => r.id === request.id) ||
+        c.folders?.some(f => f.requests.some(r => r.id === request.id))
+      ) || null;
+
       // Execute pre-request script
       if (request.preRequestScript) {
-        const preScriptResult = ScriptRunner.executePreRequestScript(
+        const preScriptResult = await ScriptRunner.executePreRequestScript(
           request.preRequestScript,
-          activeEnvironment
+          activeEnvironment,
+          { collection: activeCollection, certificates }
         );
         setLogs(prev => [...prev, ...preScriptResult.logs]);
 
@@ -742,10 +748,6 @@ function App() {
       }
 
       // Make the HTTP request
-      const activeCollection = collections.find(c =>
-        c.requests.some(r => r.id === request.id) ||
-        c.folders?.some(f => f.requests.some(r => r.id === request.id))
-      ) || null;
       const response = await HttpService.executeRequest(request, activeEnvironment, certificates, activeCollection);
       setCurrentResponse(response);
       setResponseCache(prev => ({ ...prev, [request.id]: response }));
@@ -772,10 +774,11 @@ function App() {
 
       // Execute test script
       if (request.testScript) {
-        const testScriptResult = ScriptRunner.executeTestScript(
+        const testScriptResult = await ScriptRunner.executeTestScript(
           request.testScript,
           response,
-          activeEnvironment
+          activeEnvironment,
+          { collection: activeCollection, certificates }
         );
         setLogs(prev => [...prev, ...testScriptResult.logs]);
 

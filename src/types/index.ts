@@ -40,6 +40,7 @@ export interface Collection {
   name: string;
   requests: ApiRequest[];
   folders?: CollectionFolder[];
+  variables?: Record<string, string>; // Collection-scoped script variables (pm.collectionVariables)
   auth?: {
     type: 'none' | 'bearer' | 'basic' | 'jwt';
     bearer?: string;

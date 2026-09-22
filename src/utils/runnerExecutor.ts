@@ -395,7 +395,10 @@ async function runSequence(
           const scriptEnv: Environment = ctx.environment
             ? { ...ctx.environment, variables: { ...vars } }
             : { id: 'runner-env', name: 'Runner', variables: { ...vars } };
-          const result = ScriptRunner.executePreRequestScript(request.preRequestScript, scriptEnv);
+          const result = await ScriptRunner.executePreRequestScript(request.preRequestScript, scriptEnv, {
+            collection: ctx.collection,
+            certificates: ctx.certificates,
+          });
           vars = { ...vars, ...scriptEnv.variables };
           for (const msg of result.logs) ctx.onLog?.({ level: 'script', message: msg });
         }
@@ -412,7 +415,10 @@ async function runSequence(
           const scriptEnv: Environment = ctx.environment
             ? { ...ctx.environment, variables: { ...vars } }
             : { id: 'runner-env', name: 'Runner', variables: { ...vars } };
-          const result = ScriptRunner.executeTestScript(request.testScript, response, scriptEnv);
+          const result = await ScriptRunner.executeTestScript(request.testScript, response, scriptEnv, {
+            collection: ctx.collection,
+            certificates: ctx.certificates,
+          });
           vars = { ...vars, ...scriptEnv.variables };
           for (const msg of result.logs) ctx.onLog?.({ level: 'script', message: msg });
         }
