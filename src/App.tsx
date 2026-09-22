@@ -366,6 +366,23 @@ function App() {
     }
   };
 
+  const handleImportWorkspace = async () => {
+    const fileResult = await window.electronAPI.selectJsonFile();
+    if (!fileResult.success || !fileResult.content) {
+      return; // user cancelled the file picker
+    }
+
+    const result = await window.electronAPI.importWorkspace(fileResult.content);
+    if (result.success && result.workspace) {
+      const importedWorkspace = result.workspace;
+      setWorkspaces(prev => [...prev, importedWorkspace]);
+      setActiveWorkspace(importedWorkspace);
+      console.log('[App] Imported and switched to workspace:', importedWorkspace.name);
+    } else {
+      throw new Error(result.error || 'Failed to import workspace');
+    }
+  };
+
   const handleSelectWorkspace = async (workspace: Workspace) => {
     setActiveWorkspace(workspace);
     await window.electronAPI.setActiveWorkspace(workspace.id);
@@ -988,6 +1005,7 @@ function App() {
         onUpdateWorkspace={handleUpdateWorkspace}
         onDeleteWorkspace={handleDeleteWorkspace}
         onSelectWorkspace={handleSelectWorkspace}
+        onImportWorkspace={handleImportWorkspace}
       />
 
       <SettingsModal

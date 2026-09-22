@@ -7,6 +7,8 @@ export interface ElectronAPI {
   setActiveWorkspace: (workspaceId: string) => Promise<any>;
   updateWorkspace: (workspaceId: string, name: string, description?: string) => Promise<any>;
   deleteWorkspace: (workspaceId: string) => Promise<any>;
+  exportWorkspace: (workspaceId: string) => Promise<any>;
+  importWorkspace: (bundleJson: string) => Promise<any>;
 
   // Collection management
   saveCollection: (workspaceId: string | undefined, data: any) => Promise<any>;
@@ -66,6 +68,8 @@ const api: ElectronAPI = {
   setActiveWorkspace: (workspaceId) => ipcRenderer.invoke('set-active-workspace', workspaceId),
   updateWorkspace: (workspaceId, name, description) => ipcRenderer.invoke('update-workspace', workspaceId, name, description),
   deleteWorkspace: (workspaceId) => ipcRenderer.invoke('delete-workspace', workspaceId),
+  exportWorkspace: (workspaceId) => ipcRenderer.invoke('export-workspace', workspaceId),
+  importWorkspace: (bundleJson) => ipcRenderer.invoke('import-workspace', bundleJson),
 
   // Collection management
   saveCollection: (workspaceId, data) => ipcRenderer.invoke('save-collection', workspaceId, data),

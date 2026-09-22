@@ -24,7 +24,7 @@ A local API testing tool with git support - your Postman alternative.
 - **Request body types** - None, Raw (JSON, Text, JavaScript, HTML, XML), x-www-form-urlencoded, form-data, and Binary file upload
 - **Response syntax highlighting** - JSON and XML responses are colour-coded with distinct colours for keys, string values, numbers, booleans, tag names, and attributes
 - **Drag and drop** - Reorder requests and folders in the sidebar by dragging; drag requests between folders to move them
-- **Workspace management** - Organize projects into separate workspaces with a shared git repo at the workspaces root directory
+- **Workspace management** - Organize projects into separate workspaces with a shared git repo at the workspaces root directory; export (⬇️) any workspace as a single portable bundle file and import it back in from the Workspace Manager
 - **Copy request to workspace** — right-click any request (`···` menu → Copy to Workspace) to copy it and its referenced `{{variables}}` to another workspace in one step
 - **Secrets management** - Mark variables and form parameters as secret; secrets are automatically split into `.secrets.json` files and gitignored; secret variable values are masked as `••••••••` in runner execution logs and CSV exports
 - **Request history** - Per-request execution log showing status, timing, and size; persisted per workspace and auto-pruned to a configurable maximum
@@ -456,6 +456,11 @@ Both exports round-trip through PostRebel's own importers, but some information 
 
 Environments have their own export: click **⬇️** on any environment card in the **Environment Manager** to download it as a Postman environment JSON file (`<name>.postman_environment.json`), with secret variables marked `type: "secret"`.
 
+Whole workspaces can be exported and imported too, from the **Workspace Manager**:
+
+- **Export** - Click **⬇️** on any workspace card to download a `<name>.postrebel_workspace.json` bundle containing that workspace's collections, environments (secret values included), runners, runner history, request history, and saved responses.
+- **Import** - Click **Import** next to **+ New Workspace** and choose a previously exported bundle file. A new workspace is created from it (auto-renamed with a numeric suffix if a workspace with that name already exists) and becomes the active workspace immediately.
+
 ### Request History
 
 Every time you execute a request, PostRebel records the result (method, resolved URL, status code, response time, and size) in a per-workspace history log.
@@ -602,9 +607,9 @@ npm run dist         # Create distributable packages
     - ✅ **Code generation** - `</> Code` button generates cURL, JavaScript fetch, and Python `requests` snippets with variables and auth resolved
 - ✅ **Collection Runner** - Visual flow-based runner: Request / Retry / Set Variable / Debug / Delay / For Each nodes, JavaScript conditions, dot-notation variable access, data mappings, edge output expressions, execution log, run history panel, Start-node variable overrides, inline request+response inspection
 - ✅ **Collection export (Postman v2, OpenAPI)** - Export any collection from its **···** menu in the sidebar as a Postman v2.1 collection JSON or an OpenAPI 3.0 spec; auth, headers, bodies, folders (as tags), and `{{variable}}` placeholders (as path/query params) are converted back to each format's native shape
+- ✅ **Import/export workspaces** - Export (⬇️) any workspace from the **Workspace Manager** as a single `.postrebel_workspace.json` bundle containing its collections, environments (with secret values), runners, runner history, request history, and saved responses; **Import** the file back in to recreate the whole workspace, ready to switch to immediately
 
 🚧 **Planned:**
-- Import/export workspaces
 - Workspace templates
 - Encrypted secrets storage
 - Plugin system

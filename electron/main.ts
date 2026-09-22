@@ -5,6 +5,7 @@ import { simpleGit } from 'simple-git';
 import axios, { AxiosRequestConfig } from 'axios';
 import * as https from 'https';
 import * as os from 'os';
+import { splitSecrets } from '../src/utils/secretSplitter';
 
 let mainWindow: BrowserWindow;
 
@@ -425,6 +426,235 @@ ipcMain.handle('delete-workspace', async (event, workspaceId) => {
   }
 });
 
+// Bundles an entire workspace (collections, environments, runners, runner
+// history, request history, saved responses — with secrets merged back in)
+// into a single portable JSON blob, mirroring the read + secret-merge logic
+// of load-collections/load-environments.
+ipcMain.handle('export-workspace', async (event, workspaceId) => {
+  try {
+    const workspacePath = await getWorkspacePath(workspaceId);
+
+    let workspaceMeta = { name: workspaceId, description: '' };
+    try {
+      const content = await fs.readFile(path.join(workspacePath, 'workspace.json'), 'utf-8');
+      const parsed = JSON.parse(content);
+      workspaceMeta = { name: parsed.name || workspaceId, description: parsed.description || '' };
+    } catch { /* no workspace.json, use defaults */ }
+
+    const collections: any[] = [];
+    try {
+      const collectionsDir = path.join(workspacePath, 'collections');
+      const files = await fs.readdir(collectionsDir);
+      for (const file of files) {
+        if (!file.endsWith('.json') || file.endsWith('.secrets.json')) continue;
+        const content = await fs.readFile(path.join(collectionsDir, file), 'utf-8');
+        const collection = JSON.parse(content);
+
+        const secretsFile = file.replace('.json', '.secrets.json');
+        try {
+          const secretsContent = await fs.readFile(path.join(collectionsDir, secretsFile), 'utf-8');
+          const secrets = JSON.parse(secretsContent);
+          if (secrets.requests) {
+            collection.requests.forEach((req: any) => {
+              if (secrets.requests[req.id]?.formData) {
+                req.body.formData = req.body.formData.map((param: any) =>
+                  param.isSecret && secrets.requests[req.id].formData[param.key]
+                    ? { ...param, value: secrets.requests[req.id].formData[param.key] }
+                    : param
+                );
+              }
+            });
+          }
+        } catch { /* no secrets file */ }
+
+        collections.push(collection);
+      }
+    } catch { /* no collections dir */ }
+
+    const environments: any[] = [];
+    try {
+      const envDir = path.join(workspacePath, 'environments');
+      const files = await fs.readdir(envDir);
+      for (const file of files) {
+        if (!file.endsWith('.json') || file.includes('.local.') || file.endsWith('.secrets.json')) continue;
+        const content = await fs.readFile(path.join(envDir, file), 'utf-8');
+        const environment = JSON.parse(content);
+
+        const secretsFile = file.replace('.json', '.secrets.json');
+        try {
+          const secretsContent = await fs.readFile(path.join(envDir, secretsFile), 'utf-8');
+          const secrets = JSON.parse(secretsContent);
+          if (secrets.variables && environment.variablesArray) {
+            environment.variablesArray = environment.variablesArray.map((v: any) =>
+              v.isSecret && secrets.variables[v.key] ? { ...v, value: secrets.variables[v.key] } : v
+            );
+          }
+        } catch { /* no secrets file */ }
+
+        if (environment.variablesArray) {
+          environment.variables = {};
+          environment.variablesArray.forEach((v: any) => { environment.variables[v.key] = v.value; });
+        }
+
+        environments.push(environment);
+      }
+    } catch { /* no environments dir */ }
+
+    const runners: any[] = [];
+    try {
+      const runnersDir = path.join(workspacePath, 'runners');
+      const files = (await fs.readdir(runnersDir)).filter(f => f.endsWith('.json'));
+      for (const file of files) {
+        try {
+          runners.push(JSON.parse(await fs.readFile(path.join(runnersDir, file), 'utf-8')));
+        } catch { /* skip corrupt file */ }
+      }
+    } catch { /* no runners dir */ }
+
+    const runnerHistory: Record<string, any[]> = {};
+    try {
+      const histRoot = path.join(workspacePath, 'runner-history');
+      const runnerDirs = await fs.readdir(histRoot, { withFileTypes: true });
+      for (const dirent of runnerDirs) {
+        if (!dirent.isDirectory()) continue;
+        const dir = path.join(histRoot, dirent.name);
+        const files = (await fs.readdir(dir)).filter(f => f.endsWith('.json'));
+        const entries: any[] = [];
+        for (const file of files) {
+          try {
+            entries.push(JSON.parse(await fs.readFile(path.join(dir, file), 'utf-8')));
+          } catch { /* skip corrupt file */ }
+        }
+        runnerHistory[dirent.name] = entries;
+      }
+    } catch { /* no runner-history dir */ }
+
+    let history: any[] = [];
+    try {
+      history = JSON.parse(await fs.readFile(path.join(workspacePath, 'history', 'history.json'), 'utf-8'));
+    } catch { /* no history file */ }
+
+    let savedResponses: any[] = [];
+    try {
+      savedResponses = JSON.parse(await fs.readFile(path.join(workspacePath, 'saved-responses', 'saved-responses.json'), 'utf-8'));
+    } catch { /* no saved-responses file */ }
+
+    const bundle = {
+      format: 'postrebel-workspace-v1',
+      workspace: workspaceMeta,
+      collections,
+      environments,
+      runners,
+      runnerHistory,
+      history,
+      savedResponses,
+    };
+
+    return { success: true, data: JSON.stringify(bundle, null, 2) };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+// Recreates a workspace folder from a bundle produced by export-workspace.
+// Secrets are re-split back into .secrets.json via the same helpers used by
+// save-collection/save-environment, so nothing lands in git-tracked files.
+ipcMain.handle('import-workspace', async (event, bundleJson) => {
+  try {
+    const bundle = JSON.parse(bundleJson);
+    if (bundle?.format !== 'postrebel-workspace-v1') {
+      return { success: false, error: 'Not a recognised PostRebel workspace export file' };
+    }
+
+    const workspacesDir = await getWorkspacesBaseDir();
+    await fs.mkdir(workspacesDir, { recursive: true });
+
+    const requestedName = bundle.workspace?.name || 'Imported Workspace';
+    const baseId = sanitizeFilename(requestedName);
+    let finalWorkspaceId = baseId;
+    let counter = 1;
+    while (true) {
+      try {
+        await fs.access(path.join(workspacesDir, finalWorkspaceId));
+        finalWorkspaceId = `${baseId}-${counter}`;
+        counter++;
+      } catch {
+        break;
+      }
+    }
+
+    const workspacePath = path.join(workspacesDir, finalWorkspaceId);
+    await fs.mkdir(path.join(workspacePath, 'collections'), { recursive: true });
+    await fs.mkdir(path.join(workspacePath, 'environments'), { recursive: true });
+
+    const workspace = {
+      id: finalWorkspaceId,
+      name: requestedName,
+      description: bundle.workspace?.description || '',
+      path: workspacePath,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await fs.writeFile(path.join(workspacePath, 'workspace.json'), JSON.stringify(workspace, null, 2));
+
+    const usedCollectionFilenames = new Set<string>();
+    for (const collection of bundle.collections || []) {
+      let sanitizedName = sanitizeFilename(collection.name || 'Collection');
+      let n = 1;
+      while (usedCollectionFilenames.has(sanitizedName)) {
+        sanitizedName = `${sanitizeFilename(collection.name || 'Collection')}-${n++}`;
+      }
+      usedCollectionFilenames.add(sanitizedName);
+
+      const { public: publicData, secrets } = splitSecrets(collection);
+      await fs.writeFile(path.join(workspacePath, 'collections', `${sanitizedName}.json`), JSON.stringify(publicData, null, 2));
+      if (Object.keys(secrets.requests || {}).length > 0) {
+        await fs.writeFile(path.join(workspacePath, 'collections', `${sanitizedName}.secrets.json`), JSON.stringify(secrets, null, 2));
+      }
+    }
+
+    for (const environment of bundle.environments || []) {
+      await saveEnvironmentData(finalWorkspaceId, environment);
+    }
+
+    if ((bundle.runners || []).length > 0) {
+      const runnersDir = path.join(workspacePath, 'runners');
+      await fs.mkdir(runnersDir, { recursive: true });
+      for (const runner of bundle.runners) {
+        await fs.writeFile(path.join(runnersDir, `${runner.id}.json`), JSON.stringify(runner, null, 2));
+      }
+    }
+
+    for (const [runnerId, entries] of Object.entries(bundle.runnerHistory || {})) {
+      const dir = path.join(workspacePath, 'runner-history', runnerId);
+      await fs.mkdir(dir, { recursive: true });
+      for (const entry of entries as any[]) {
+        await fs.writeFile(path.join(dir, `${entry.id}.json`), JSON.stringify(entry, null, 2));
+      }
+    }
+
+    if ((bundle.history || []).length > 0) {
+      const historyDir = path.join(workspacePath, 'history');
+      await fs.mkdir(historyDir, { recursive: true });
+      await fs.writeFile(path.join(historyDir, 'history.json'), JSON.stringify(bundle.history, null, 2));
+    }
+
+    if ((bundle.savedResponses || []).length > 0) {
+      const savedDir = path.join(workspacePath, 'saved-responses');
+      await fs.mkdir(savedDir, { recursive: true });
+      await fs.writeFile(path.join(savedDir, 'saved-responses.json'), JSON.stringify(bundle.savedResponses, null, 2));
+      await fs.writeFile(path.join(workspacePath, '.gitignore'), 'saved-responses/\n');
+    }
+
+    await ensureGitAtWorkspacesRoot(workspacesDir);
+
+    console.log('[Electron] Imported workspace:', finalWorkspaceId);
+    return { success: true, workspace };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 // Helper functions for workspace management
 async function getWorkspacePath(workspaceId?: string): Promise<string> {
   if (!workspaceId) {
@@ -487,48 +717,6 @@ function sanitizeFilename(name: string): string {
     .replace(/^\.+/, '') // Remove leading dots
     .replace(/\.+$/, '') // Remove trailing dots
     .substring(0, 255); // Limit length
-}
-
-function splitSecrets(data: any): { public: any; secrets: any } {
-  const publicData = JSON.parse(JSON.stringify(data)); // deep clone
-  const secrets: any = {};
-
-  // Handle environment variables
-  if (data.variablesArray) {
-    publicData.variablesArray = [];
-    secrets.variables = {};
-
-    data.variablesArray.forEach((v: any) => {
-      if (v.isSecret) {
-        secrets.variables[v.key] = v.value;
-        publicData.variablesArray.push({ key: v.key, value: '', isSecret: true });
-      } else {
-        publicData.variablesArray.push(v);
-      }
-    });
-  }
-
-  // Handle form data secrets in requests
-  if (data.requests) {
-    secrets.requests = {};
-    data.requests.forEach((req: any, idx: number) => {
-      if (req.body?.formData) {
-        const secretParams: any = {};
-        req.body.formData = req.body.formData.map((param: any) => {
-          if (param.isSecret) {
-            secretParams[param.key] = param.value;
-            return { ...param, value: '' };
-          }
-          return param;
-        });
-        if (Object.keys(secretParams).length > 0) {
-          secrets.requests[req.id] = { formData: secretParams };
-        }
-      }
-    });
-  }
-
-  return { public: publicData, secrets };
 }
 
 // IPC Handlers for file operations

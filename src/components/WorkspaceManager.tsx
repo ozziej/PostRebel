@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
 import { Workspace } from '../types';
+import { downloadTextFile } from '../utils/download';
+
+function safeFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'workspace';
+}
 
 interface WorkspaceManagerProps {
   isOpen: boolean;
@@ -10,6 +15,7 @@ interface WorkspaceManagerProps {
   onUpdateWorkspace: (workspaceId: string, name: string, description?: string) => Promise<void>;
   onDeleteWorkspace: (workspaceId: string) => Promise<void>;
   onSelectWorkspace: (workspace: Workspace) => void;
+  onImportWorkspace?: () => Promise<void>;
 }
 
 export const WorkspaceManager: React.FC<WorkspaceManagerProps> = ({
@@ -20,7 +26,8 @@ export const WorkspaceManager: React.FC<WorkspaceManagerProps> = ({
   onCreateWorkspace,
   onUpdateWorkspace,
   onDeleteWorkspace,
-  onSelectWorkspace
+  onSelectWorkspace,
+  onImportWorkspace
 }) => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingWorkspace, setEditingWorkspace] = useState<string | null>(null);
@@ -28,8 +35,30 @@ export const WorkspaceManager: React.FC<WorkspaceManagerProps> = ({
   const [newDescription, setNewDescription] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   if (!isOpen) return null;
+
+  const handleExport = async (workspace: Workspace) => {
+    const result = await window.electronAPI.exportWorkspace(workspace.id);
+    if (result.success && result.data) {
+      downloadTextFile(`${safeFileName(workspace.name)}.postrebel_workspace.json`, result.data, 'application/json');
+    } else {
+      alert(`Failed to export workspace: ${result.error || 'Unknown error'}`);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!onImportWorkspace) return;
+    setIsImporting(true);
+    try {
+      await onImportWorkspace();
+    } catch (error) {
+      alert(`Failed to import workspace: ${error}`);
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   const handleCreate = async () => {
     if (!newName.trim()) {
@@ -160,13 +189,25 @@ export const WorkspaceManager: React.FC<WorkspaceManagerProps> = ({
 
         {/* Create New Workspace Button */}
         {!showCreateForm && (
-          <button
-            onClick={() => setShowCreateForm(true)}
-            className="button"
-            style={{ width: '100%', marginBottom: '1.5rem' }}
-          >
-            + New Workspace
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+            <button
+              onClick={() => setShowCreateForm(true)}
+              className="button"
+              style={{ flex: 1 }}
+            >
+              + New Workspace
+            </button>
+            {onImportWorkspace && (
+              <button
+                onClick={handleImport}
+                className="button-secondary button"
+                title="Import a workspace file"
+                disabled={isImporting}
+              >
+                {isImporting ? 'Importing...' : 'Import'}
+              </button>
+            )}
+          </div>
         )}
 
         {/* Create Form */}
@@ -324,12 +365,17 @@ export const WorkspaceManager: React.FC<WorkspaceManagerProps> = ({
                 ) : (
                   <div
                     key={workspace.id}
+                    onClick={() => onSelectWorkspace(workspace)}
+                    title="Click to switch to this workspace"
                     style={{
                       backgroundColor: activeWorkspace?.id === workspace.id ? '#1a2d2d' : '#404040',
                       border: `1px solid ${activeWorkspace?.id === workspace.id ? '#0d7377' : '#555'}`,
                       borderRadius: '4px',
-                      padding: '1rem'
+                      padding: '1rem',
+                      cursor: 'pointer'
                     }}
+                    onMouseEnter={e => { if (activeWorkspace?.id !== workspace.id) e.currentTarget.style.backgroundColor = '#4a4a4a'; }}
+                    onMouseLeave={e => { if (activeWorkspace?.id !== workspace.id) e.currentTarget.style.backgroundColor = '#404040'; }}
                   >
                     <div style={{
                       display: 'flex',
@@ -376,14 +422,14 @@ export const WorkspaceManager: React.FC<WorkspaceManagerProps> = ({
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
                       <button
-                        onClick={() => {
-                          onSelectWorkspace(workspace);
-                          onClose();
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleExport(workspace);
                         }}
-                        className="button"
-                        style={{ flex: 1 }}
+                        className="button-secondary button"
+                        title="Export workspace"
                       >
-                        Switch to Workspace
+                        ⬇️
                       </button>
                       <button
                         onClick={(e) => {

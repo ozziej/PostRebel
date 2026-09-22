@@ -208,6 +208,8 @@ declare global {
       setActiveWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>;
       updateWorkspace: (workspaceId: string, name: string, description?: string) => Promise<{ success: boolean; workspace?: Workspace; error?: string }>;
       deleteWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>;
+      exportWorkspace: (workspaceId: string) => Promise<{ success: boolean; data?: string; error?: string }>;
+      importWorkspace: (bundleJson: string) => Promise<{ success: boolean; workspace?: Workspace; error?: string }>;
 
       // Collection management (workspace-aware)
       saveCollection: (workspaceId: string | undefined, data: Collection) => Promise<{ success: boolean; path?: string; error?: string }>;
