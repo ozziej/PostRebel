@@ -27,6 +27,7 @@ A local API testing tool with git support - your Postman alternative.
 - **Workspace management** - Organize projects into separate workspaces with a shared git repo at the workspaces root directory; export (⬇️) any workspace as a single portable bundle file and import it back in from the Workspace Manager
 - **Copy request to workspace** — right-click any request (`···` menu → Copy to Workspace) to copy it and its referenced `{{variables}}` to another workspace in one step
 - **Secrets management** - Mark variables and form parameters as secret; secrets are automatically split into `.secrets.json` files and gitignored; secret variable values are masked as `••••••••` in runner execution logs and CSV exports
+- **Local secret scanner** - A ⚠️ warning appears next to any header, environment variable, or form-data value that looks like a real secret (AWS/GitHub/Slack/Stripe/Google tokens, PEM blocks, JWTs, hardcoded Bearer tokens, or a suspiciously-named field) but isn't marked as secret
 - **Request history** - Per-request execution log showing status, timing, and size; persisted per workspace and auto-pruned to a configurable maximum
 - **Saved responses** - Snapshot and name any response for future reference; saved responses are listed under their parent request in the sidebar
 - **Collection folders** - Group requests inside a collection; add folders manually or have them created automatically on OpenAPI import (one folder per tag); drag and drop to reorder and move requests between folders
@@ -608,12 +609,28 @@ npm run dist         # Create distributable packages
 - ✅ **Collection Runner** - Visual flow-based runner: Request / Retry / Set Variable / Debug / Delay / For Each nodes, JavaScript conditions, dot-notation variable access, data mappings, edge output expressions, execution log, run history panel, Start-node variable overrides, inline request+response inspection
 - ✅ **Collection export (Postman v2, OpenAPI)** - Export any collection from its **···** menu in the sidebar as a Postman v2.1 collection JSON or an OpenAPI 3.0 spec; auth, headers, bodies, folders (as tags), and `{{variable}}` placeholders (as path/query params) are converted back to each format's native shape
 - ✅ **Import/export workspaces** - Export (⬇️) any workspace from the **Workspace Manager** as a single `.postrebel_workspace.json` bundle containing its collections, environments (with secret values), runners, runner history, request history, and saved responses; **Import** the file back in to recreate the whole workspace, ready to switch to immediately
+- ✅ **Local secret scanner** - Header, environment variable, and form-data param values are checked against known secret formats (AWS keys, GitHub/Slack/Stripe tokens, PEM blocks, JWTs, hardcoded Bearer tokens) and suspicious key names (`*token*`, `*secret*`, `*api_key*`, `*password*`, ...); a ⚠️ warning icon appears next to any match that isn't marked `isSecret` (headers have no secret-marking mechanism at all, so any match there is always flagged)
 
 🚧 **Planned:**
 - Workspace templates
 - Encrypted secrets storage
 - Plugin system
 - Parameterised dynamic variables e.g. `{{randomInt(1,100)}}`
+
+**Design principle: stay local-first.** PostRebel will not grow a cloud account, hosted sync, or team-server component — that's the single biggest recurring complaint about Postman (forced login just to save a collection, "always online" requirements, tightening free-tier pricing). Everything below should work fully offline, with git as the only sharing mechanism.
+
+**From a Bruno/Postman feature comparison, in priority order:**
+1. **Expand the `pm` script API** - Add `pm.sendRequest()` (fire a request from a script, e.g. to fetch a fresh token), `pm.collectionVariables`, and `pm.globals`. Closes the biggest real-world scripting gap versus Postman/Bruno.
+2. **Persistent request/response console** - A DevTools-style log of every sent request (resolved URL/headers/timing) and script `console.log` output, available for ad-hoc requests, not just Collection Runner flows.
+3. **Nested collection folders** - Both Bruno and Postman support arbitrary folder nesting; PostRebel is one level only today.
+4. **Headless CLI runner** - `postrebel run <collection> --env staging` producing JUnit/JSON output, reusing the existing Collection Runner execution engine without Electron/GUI. This is the main reason teams pick Bruno over Postman for CI.
+5. **OAuth2 auth type** (Authorization Code + PKCE, Client Credentials) - The biggest real-world auth gap. Needs an Electron-native redirect strategy (loopback `127.0.0.1` server + system browser, and/or a custom URI scheme) rather than depending on any hosted relay service.
+6. **GraphQL request support** - Query editor, variables pane, and schema introspection on URL entry.
+7. **Data-file-driven runs** - Run a request/flow once per row of an external CSV/JSON file, distinct from the existing For Each node (which iterates response data, not an external file).
+8. **OpenAPI drift check** - Re-importing a spec into an existing collection shows an added/removed/changed diff instead of blindly merging.
+9. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
+
+Explicitly out of scope as a result of the local-first principle: mock servers, monitors/scheduled runs, team SSO/SCIM, or any other feature that requires a hosted service.
 
 ## Contributing
 

@@ -6,6 +6,7 @@ import { SearchOptions } from './SearchBar';
 import { findMatches, highlightText } from '../utils/searchHighlight';
 import { RunnerCanvas } from './RunnerCanvas';
 import { generateCurl, generateFetch, generatePython } from '../utils/codeGenerator';
+import { scanKeyValueForSecret } from '../utils/secretScanner';
 import jsonlint from 'jsonlint-mod';
 
 function formatRelativeTime(isoDate: string): string {
@@ -439,8 +440,11 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
 
       {activeTab === 'headers' && (
         <div>
-          {Object.entries(localRequest.headers).map(([key, value], index) => (
-            <div key={index} style={{ display: 'flex', gap: '0.5rem', margin: '0.5rem 0' }}>
+          {Object.entries(localRequest.headers).map(([key, value], index) => {
+            const secretWarning = scanKeyValueForSecret(key, value);
+
+            return (
+            <div key={index} style={{ display: 'flex', gap: '0.5rem', margin: '0.5rem 0', alignItems: 'center' }}>
               <input
                 type="text"
                 placeholder="Header name"
@@ -463,6 +467,14 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                 className="form-input"
                 style={{ flex: 1 }}
               />
+              {secretWarning && (
+                <span
+                  title={`This header value ${secretWarning.reason} but headers have no way to mark a value as secret — consider moving it into an environment variable marked 🔒 instead.`}
+                  style={{ fontSize: '1rem', cursor: 'help' }}
+                >
+                  ⚠️
+                </span>
+              )}
               <button
                 onClick={() => {
                   const newHeaders = { ...localRequest.headers };
@@ -474,7 +486,8 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                 ✗
               </button>
             </div>
-          ))}
+            );
+          })}
           <button onClick={addHeader} className="button">
             + Add Header
           </button>

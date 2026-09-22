@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Environment, KeyValuePair } from '../types';
 import { VariableInput } from './VariableInput';
+import { scanKeyValueForSecret } from '../utils/secretScanner';
 
 interface KeyValueEditorProps {
   data: KeyValuePair[];
@@ -155,7 +156,12 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
             No parameters. Click "+ Add Parameter" or "Bulk Edit" to add.
           </div>
         ) : (
-          data.map((item, index) => (
+          data.map((item, index) => {
+            const secretWarning = allowSecrets && !item.isSecret
+              ? scanKeyValueForSecret(item.key, item.value)
+              : null;
+
+            return (
             <div key={index} style={{
               display: 'flex',
               gap: '0.5rem',
@@ -214,6 +220,14 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
                   {item.isSecret ? '🔒' : '🔓'}
                 </button>
               )}
+              {secretWarning && (
+                <span
+                  title={`This value ${secretWarning.reason} but isn't marked as secret — click 🔓 to mark it, so it's kept out of git.`}
+                  style={{ fontSize: '1rem', cursor: 'help' }}
+                >
+                  ⚠️
+                </span>
+              )}
               <button
                 onClick={() => deleteRow(index)}
                 className="button-secondary button"
@@ -223,7 +237,8 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
                 🗑️
               </button>
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
