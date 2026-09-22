@@ -5,6 +5,7 @@ import {
 import { HttpService } from './httpService';
 import { resolveDynamicVariable } from './dynamicVariables';
 import { ScriptRunner } from './scriptRunner';
+import { findRequestById } from './collectionTree';
 
 /** Returns '••••••••' for known secret variable names, otherwise the original value. */
 function maskSecret(varName: string, value: string, secretNames: Set<string>): string {
@@ -371,13 +372,7 @@ async function runSequence(
 
     // ── Request ──────────────────────────────────────────────────────────────
     if (node.type === 'request') {
-      let request = ctx.collection.requests.find(r => r.id === node.data.requestId);
-      if (!request) {
-        for (const folder of ctx.collection.folders || []) {
-          const found = folder.requests.find(r => r.id === node.data.requestId);
-          if (found) { request = found; break; }
-        }
-      }
+      const request = findRequestById(ctx.collection, node.data.requestId || '');
 
       if (!request) {
         ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'error', error: 'Request not found in collection' });
@@ -509,13 +504,7 @@ async function runSequence(
       const backoffMultiplier = (node.data.retryBackoffMultiplier as number | undefined) ?? 2;
       const retryCondition = node.data.retryCondition as string | undefined;
 
-      let request = ctx.collection.requests.find(r => r.id === requestId);
-      if (!request) {
-        for (const folder of ctx.collection.folders || []) {
-          const found = folder.requests.find(r => r.id === requestId);
-          if (found) { request = found; break; }
-        }
-      }
+      const request = findRequestById(ctx.collection, requestId || '');
 
       if (!request) {
         ctx.onNodeStatusChange(node.id, { nodeId: node.id, status: 'error', error: 'Request not found in collection' });

@@ -3,6 +3,7 @@ import { Collection, Environment, ApiRequest, Workspace, SavedResponse, Collecti
 import { exportPostmanCollection } from '../utils/postmanExporter';
 import { exportOpenApi } from '../utils/openApiExporter';
 import { downloadTextFile } from '../utils/download';
+import { countRequests, findFolderById, updateFolderById, removeFolderById, addFolder, updateRequestById } from '../utils/collectionTree';
 
 function safeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'collection';
@@ -173,7 +174,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [showNewCollection, setShowNewCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
-  const [newFolderCollectionId, setNewFolderCollectionId] = useState<string | null>(null);
+  const [newFolderTarget, setNewFolderTarget] = useState<{ collectionId: string; parentFolderId: string | null } | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [editingCollection, setEditingCollection] = useState<string | null>(null);
   const [editingRequest, setEditingRequest] = useState<string | null>(null);
@@ -254,19 +255,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onSelectRequest(newRequest);
   };
 
-  const createFolder = async (collection: Collection) => {
+  const createFolder = async (collection: Collection, parentFolderId: string | null) => {
     if (!newFolderName.trim()) return;
     const newFolder: CollectionFolder = {
       id: Date.now().toString(),
       name: newFolderName.trim(),
       requests: [],
     };
-    const updatedCollection = {
-      ...collection,
-      folders: [...(collection.folders || []), newFolder],
-    };
+    const updatedCollection = addFolder(collection, parentFolderId, newFolder);
     await onSaveCollection(updatedCollection);
-    setNewFolderCollectionId(null);
+    setNewFolderTarget(null);
     setNewFolderName('');
     setExpandedFolders(prev => new Set([...prev, newFolder.id]));
   };
@@ -285,20 +283,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     await onDeleteRequest(collection.id, requestId);
   };
 
-  const duplicateRequest = async (collection: Collection, request: ApiRequest, folderId?: string) => {
+  const duplicateRequest = async (collection: Collection, request: ApiRequest, folderId: string | null = null) => {
     const copy: ApiRequest = { ...request, id: `${Date.now()}`, name: `${request.name} (copy)` };
     let updated: Collection;
     if (folderId) {
-      updated = {
-        ...collection,
-        folders: collection.folders?.map(f => {
-          if (f.id !== folderId) return f;
-          const idx = f.requests.findIndex(r => r.id === request.id);
-          const reqs = [...f.requests];
-          reqs.splice(idx + 1, 0, copy);
-          return { ...f, requests: reqs };
-        }),
-      };
+      updated = updateFolderById(collection, folderId, f => {
+        const idx = f.requests.findIndex(r => r.id === request.id);
+        const reqs = [...f.requests];
+        reqs.splice(idx + 1, 0, copy);
+        return { ...f, requests: reqs };
+      });
     } else {
       const idx = collection.requests.findIndex(r => r.id === request.id);
       const reqs = [...collection.requests];
@@ -359,20 +353,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const saveRequestName = async (collection: Collection, request: ApiRequest) => {
     if (!editName.trim()) return;
-
-    const updatedCollection = {
-      ...collection,
-      requests: collection.requests.map(r =>
-        r.id === request.id ? { ...r, name: editName } : r
-      ),
-      folders: collection.folders?.map(f => ({
-        ...f,
-        requests: f.requests.map(r =>
-          r.id === request.id ? { ...r, name: editName } : r
-        ),
-      })),
-    };
-
+    const updatedCollection = updateRequestById(collection, request.id, r => ({ ...r, name: editName }));
     await onSaveCollection(updatedCollection);
     setEditingRequest(null);
     setEditName('');
@@ -385,29 +366,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const saveFolderName = async (collection: Collection, folder: CollectionFolder) => {
     if (!editName.trim()) return;
-    const updatedCollection = {
-      ...collection,
-      folders: collection.folders?.map(f =>
-        f.id === folder.id ? { ...f, name: editName } : f
-      ),
-    };
+    const updatedCollection = updateFolderById(collection, folder.id, f => ({ ...f, name: editName }));
     await onSaveCollection(updatedCollection);
     setEditingFolder(null);
     setEditName('');
   };
 
   const deleteFolder = async (collection: Collection, folder: CollectionFolder) => {
-    const count = folder.requests.length;
+    const count = countRequests(folder);
     const warning = count > 0
       ? `This folder contains ${count} request${count !== 1 ? 's' : ''}. `
       : '';
     if (!confirm(`${warning}Are you sure you want to delete the folder "${folder.name}"? This action cannot be undone.`)) {
       return;
     }
-    const updatedCollection = {
-      ...collection,
-      folders: collection.folders?.filter(f => f.id !== folder.id),
-    };
+    const updatedCollection = removeFolderById(collection, folder.id);
     await onSaveCollection(updatedCollection);
   };
 
@@ -503,33 +476,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const sameCollection = currentDragItem.sourceCollectionId === targetCollectionId;
 
     if (currentDragItem.type === 'request') {
-      // Find the request in its source location
-      let request: ApiRequest | undefined;
-      if (currentDragItem.sourceFolderId) {
-        const folder = sourceCollection.folders?.find(f => f.id === currentDragItem.sourceFolderId);
-        request = folder?.requests.find(r => r.id === currentDragItem.id);
-      } else {
-        request = sourceCollection.requests.find(r => r.id === currentDragItem.id);
-      }
+      // Find the request in its source location, at any depth
+      const sourceContainer = currentDragItem.sourceFolderId
+        ? findFolderById(sourceCollection, currentDragItem.sourceFolderId)
+        : sourceCollection;
+      const request = sourceContainer?.requests.find(r => r.id === currentDragItem.id);
       if (!request) return;
 
-      // Remove from source
-      let removedSource: Collection;
-      if (currentDragItem.sourceFolderId) {
-        removedSource = {
-          ...sourceCollection,
-          folders: sourceCollection.folders?.map(f =>
-            f.id === currentDragItem.sourceFolderId
-              ? { ...f, requests: f.requests.filter(r => r.id !== currentDragItem.id) }
-              : f
-          ),
-        };
-      } else {
-        removedSource = {
-          ...sourceCollection,
-          requests: sourceCollection.requests.filter(r => r.id !== currentDragItem.id),
-        };
-      }
+      // Remove from source (works at any depth, or at the collection root)
+      const removedSource: Collection = currentDragItem.sourceFolderId
+        ? updateFolderById(sourceCollection, currentDragItem.sourceFolderId, f => ({
+            ...f,
+            requests: f.requests.filter(r => r.id !== currentDragItem.id),
+          }))
+        : { ...sourceCollection, requests: sourceCollection.requests.filter(r => r.id !== currentDragItem.id) };
 
       // Adjust insertIndex for same-container reorders (item removal shifts indices)
       let actualInsertIndex = insertIndex;
@@ -538,38 +498,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
           (!currentDragItem.sourceFolderId && !targetFolderId) ||
           (currentDragItem.sourceFolderId === targetFolderId);
         if (sameContainer) {
-          let fromIndex: number;
-          if (targetFolderId) {
-            const folder = sourceCollection.folders?.find(f => f.id === targetFolderId);
-            fromIndex = folder?.requests.findIndex(r => r.id === currentDragItem.id) ?? -1;
-          } else {
-            fromIndex = sourceCollection.requests.findIndex(r => r.id === currentDragItem.id);
-          }
+          const fromIndex = sourceContainer?.requests.findIndex(r => r.id === currentDragItem.id) ?? -1;
           if (fromIndex >= 0 && fromIndex < insertIndex) {
             actualInsertIndex = insertIndex - 1;
           }
         }
       }
 
-      // Insert into target
+      // Insert into target (works at any depth, or at the collection root)
       const baseTarget = sameCollection ? removedSource : targetCollection;
-      let updatedTarget: Collection;
-
-      if (targetFolderId) {
-        updatedTarget = {
-          ...baseTarget,
-          folders: baseTarget.folders?.map(f => {
-            if (f.id !== targetFolderId) return f;
+      const updatedTarget: Collection = targetFolderId
+        ? updateFolderById(baseTarget, targetFolderId, f => {
             const newRequests = [...f.requests];
-            newRequests.splice(actualInsertIndex, 0, request!);
+            newRequests.splice(actualInsertIndex, 0, request);
             return { ...f, requests: newRequests };
-          }),
-        };
-      } else {
-        const newRequests = [...(baseTarget.requests || [])];
-        newRequests.splice(actualInsertIndex, 0, request);
-        updatedTarget = { ...baseTarget, requests: newRequests };
-      }
+          })
+        : (() => {
+            const newRequests = [...baseTarget.requests];
+            newRequests.splice(actualInsertIndex, 0, request);
+            return { ...baseTarget, requests: newRequests };
+          })();
 
       if (sameCollection) {
         await onSaveCollection(updatedTarget);
@@ -645,6 +593,289 @@ export const Sidebar: React.FC<SidebarProps> = ({
       >
         {isActive && (
           <div style={{ height: '2px', width: '100%', backgroundColor: '#0d7377', borderRadius: '1px', pointerEvents: 'none' }} />
+        )}
+      </div>
+    );
+  };
+
+  // Inline "new folder" input, shared between the collection root (parentFolderId
+  // === null) and any folder (parentFolderId === that folder's id, at any depth).
+  const renderNewFolderForm = (collection: Collection, parentFolderId: string | null, indentRem: number) => {
+    if (newFolderTarget?.collectionId !== collection.id || newFolderTarget?.parentFolderId !== parentFolderId) return null;
+    return (
+      <div style={{ display: 'flex', gap: '0.5rem', padding: '0.35rem 0.5rem', paddingLeft: `${indentRem}rem`, borderTop: '1px solid #333' }}>
+        <input
+          type="text"
+          placeholder="Folder name"
+          value={newFolderName}
+          onChange={(e) => setNewFolderName(e.target.value)}
+          className="form-input"
+          style={{ fontSize: '0.8rem', flex: 1 }}
+          onKeyPress={(e) => e.key === 'Enter' && createFolder(collection, parentFolderId)}
+          autoFocus
+        />
+        <button className="button" onClick={() => createFolder(collection, parentFolderId)} style={{ fontSize: '0.8rem', padding: '0.2rem 0.4rem' }}>✓</button>
+        <button className="button-secondary button" onClick={() => { setNewFolderTarget(null); setNewFolderName(''); }} style={{ fontSize: '0.8rem', padding: '0.2rem 0.4rem' }}>✗</button>
+      </div>
+    );
+  };
+
+  // Renders a single request row — shared between top-level collection requests
+  // (folderId === null) and requests inside any folder, at any depth.
+  const renderRequestRow = (
+    collection: Collection,
+    request: ApiRequest,
+    reqIndex: number,
+    folderId: string | null,
+    depth: number,
+  ) => {
+    const reqSavedResponses = savedResponses.filter(s => s.requestId === request.id);
+    const isReqExpanded = expandedRequests.has(request.id);
+    const isReqDragging = dragItem?.id === request.id;
+    const handleIndent = depth === 0 ? 4 : 24 + (depth - 1) * 16; // px — matches the previous 1-level indent (1.5rem ≈ 24px) and scales with depth
+
+    return (
+      <div key={request.id}>
+        <div
+          className="request-item"
+          draggable={editingRequest !== request.id}
+          onDragStart={(e) => handleDragStart(e, 'request', request.id, collection.id, folderId)}
+          onDragEnd={handleDragEnd}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0.5rem 0.75rem 0.5rem 0.25rem',
+            cursor: editingRequest !== request.id ? 'grab' : 'default',
+            opacity: isReqDragging ? 0.4 : 1,
+            backgroundColor: activeRequest?.id === request.id ? '#0d737720' : 'transparent',
+          }}
+          onClick={() => { if (editingRequest !== request.id) onSelectRequest(request); }}
+        >
+          {editingRequest !== request.id && (
+            <span style={{ color: '#555', fontSize: '0.85rem', padding: `0 4px 0 ${handleIndent}px`, flexShrink: 0, userSelect: 'none', pointerEvents: 'none' }}>⠿</span>
+          )}
+          {editingRequest === request.id ? (
+            <>
+              <span className={`http-method ${request.method}`} style={{ marginRight: '0.5rem' }}>
+                {request.method}
+              </span>
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="form-input"
+                style={{ fontSize: '0.9rem', flex: 1, marginRight: '0.5rem' }}
+                onKeyPress={(e) => e.key === 'Enter' && saveRequestName(collection, request)}
+                onBlur={() => saveRequestName(collection, request)}
+                onClick={(e) => e.stopPropagation()}
+                autoFocus
+              />
+              <button onClick={(e) => { e.stopPropagation(); saveRequestName(collection, request); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} className="button">✓</button>
+              <button onClick={(e) => { e.stopPropagation(); cancelEdit(); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }} className="button-secondary button">✗</button>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                {reqSavedResponses.length > 0 && (
+                  <button onClick={(e) => { e.stopPropagation(); toggleRequest(request.id); }} style={{ background: 'none', border: 'none', color: '#888', padding: '0', cursor: 'pointer', fontSize: '0.6rem', flexShrink: 0 }} title="Toggle saved responses">
+                    {isReqExpanded ? '▼' : '▶'}
+                  </button>
+                )}
+                <span className={`http-method ${request.method}`}>{request.method}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{request.name}</span>
+              </div>
+              <div style={{ position: 'relative' }}>
+                <button onClick={(e) => openMenu(e, `req-${request.id}`)} className="button-secondary button" style={{ fontSize: '0.8rem', padding: '0.15rem 0.4rem', letterSpacing: '0.05em' }} title="More actions">···</button>
+                {openMenuId === `req-${request.id}` && menuPos && (
+                  <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
+                    <MenuItem icon="✏️" label="Rename" onClick={() => { setOpenMenuId(null); startEditingRequest(request); }} />
+                    <MenuItem icon="⿻" label="Duplicate" onClick={() => { setOpenMenuId(null); duplicateRequest(collection, request, folderId); }} />
+                    <MenuItem icon="→" label="Copy to Workspace" onClick={() => { setOpenMenuId(null); onCopyToWorkspace(request); }} />
+                    <MenuDivider />
+                    <MenuItem icon="🗑️" label="Delete" onClick={() => { setOpenMenuId(null); deleteRequest(collection, request.id, request.name); }} destructive />
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {isReqExpanded && reqSavedResponses.length > 0 && (
+          <div style={{ paddingLeft: `${1.5 + depth * 1}rem` }}>
+            {reqSavedResponses.map(saved => (
+              <div
+                key={saved.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.3rem 0.5rem',
+                  cursor: 'pointer',
+                  borderLeft: `2px solid #0d7377`,
+                  marginBottom: '2px',
+                  borderRadius: '0 4px 4px 0',
+                  backgroundColor: activeSavedResponse?.id === saved.id ? '#0d737720' : 'transparent',
+                }}
+                onClick={() => { if (editingSavedResponse !== saved.id) onSelectSavedResponse(saved); }}
+              >
+                {editingSavedResponse === saved.id ? (
+                  <>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="form-input"
+                      style={{ fontSize: '0.8rem', flex: 1, marginRight: '0.5rem' }}
+                      onKeyPress={(e) => e.key === 'Enter' && saveSavedResponseName(saved.id)}
+                      onBlur={() => saveSavedResponseName(saved.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      autoFocus
+                    />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); saveSavedResponseName(saved.id); }}
+                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
+                      className="button"
+                    >✓</button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); cancelEdit(); }}
+                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }}
+                      className="button-secondary button"
+                    >✗</button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{
+                      fontSize: '0.8rem',
+                      color: activeSavedResponse?.id === saved.id ? '#0d9e9e' : '#aaa',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      flex: 1,
+                    }}>
+                      ↳ {saved.name}
+                    </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setEditingSavedResponse(saved.id); setEditName(saved.name); }}
+                      style={{ fontSize: '0.65rem', padding: '0.15rem 0.3rem', marginRight: '0.2rem', flexShrink: 0 }}
+                      className="button-secondary button"
+                      title="Rename saved response"
+                    >✏️</button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDeleteSavedResponse(saved.id); }}
+                      style={{ fontSize: '0.65rem', padding: '0.15rem 0.3rem', flexShrink: 0 }}
+                      className="button-secondary button"
+                      title="Delete saved response"
+                    >🗑️</button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {renderDropZone(collection.id, folderId, reqIndex + 1, 'request')}
+      </div>
+    );
+  };
+
+  // Renders a folder row and, recursively, its nested sub-folders and requests.
+  // Folder drag-and-drop reordering only works at the collection root today
+  // (see handleMove) — nested folders can still be created/renamed/deleted, and
+  // requests can be dragged into/out of them, just not reordered via drag yet.
+  const renderFolder = (collection: Collection, folder: CollectionFolder, depth: number) => {
+    const isFolderExpanded = expandedFolders.has(folder.id);
+    const isFolderDragging = dragItem?.id === folder.id;
+    const isFolderDropTarget = dropFolderHighlight === folder.id;
+    const headerIndentRem = 0.25 + depth * 1;
+
+    return (
+      <div key={folder.id}>
+        {/* Folder header row — draggable for reordering, but only at the collection root today */}
+        <div
+          draggable={editingFolder !== folder.id && depth === 0}
+          onDragStart={(e) => handleDragStart(e, 'folder', folder.id, collection.id, null)}
+          onDragEnd={handleDragEnd}
+          onDragOver={(e) => handleDragOverFolder(e, folder.id)}
+          onDragLeave={(e) => {
+            e.stopPropagation();
+            if (dropFolderHighlight === folder.id) setDropFolderHighlight(null);
+          }}
+          onDrop={(e) => handleDropOnFolder(e, collection.id, folder)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: `0.35rem 0.5rem 0.35rem ${headerIndentRem}rem`,
+            userSelect: 'none',
+            borderTop: '1px solid #333',
+            opacity: isFolderDragging ? 0.4 : 1,
+            backgroundColor: isFolderDropTarget ? '#0d737720' : 'transparent',
+            outline: isFolderDropTarget ? '1px solid #0d7377' : 'none',
+            borderRadius: isFolderDropTarget ? '3px' : '0',
+            cursor: editingFolder !== folder.id && depth === 0 ? 'grab' : 'default',
+          }}
+        >
+          {editingFolder !== folder.id && depth === 0 && (
+            <span style={{ color: '#555', fontSize: '0.85rem', padding: '0 4px', flexShrink: 0, userSelect: 'none', pointerEvents: 'none' }}>⠿</span>
+          )}
+          <div
+            onClick={() => { if (editingFolder !== folder.id) toggleFolder(folder.id); }}
+            style={{ display: 'flex', alignItems: 'center', flex: 1, cursor: editingFolder === folder.id ? 'default' : 'pointer', minWidth: 0, overflow: 'hidden' }}
+          >
+            <span style={{ marginRight: '0.5rem', flexShrink: 0 }}>
+              {isFolderExpanded ? '▼' : '▶'}
+            </span>
+            {editingFolder === folder.id ? (
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="form-input"
+                style={{ fontSize: '0.85rem', flex: 1, marginRight: '0.25rem' }}
+                onKeyPress={(e) => e.key === 'Enter' && saveFolderName(collection, folder)}
+                onBlur={() => saveFolderName(collection, folder)}
+                onClick={(e) => e.stopPropagation()}
+                autoFocus
+              />
+            ) : (
+              <span style={{ color: '#ccc', fontSize: '0.9rem', fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {folder.name}
+              </span>
+            )}
+          </div>
+          {editingFolder === folder.id ? (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); saveFolderName(collection, folder); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} className="button">✓</button>
+              <button onClick={(e) => { e.stopPropagation(); cancelEdit(); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }} className="button-secondary button">✗</button>
+            </>
+          ) : (
+            <>
+              <span style={{ color: '#555', fontSize: '0.7rem', marginRight: '0.3rem' }}>{countRequests(folder)}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setNewFolderTarget({ collectionId: collection.id, parentFolderId: folder.id });
+                  setNewFolderName('');
+                  setExpandedFolders(prev => new Set([...prev, folder.id]));
+                }}
+                style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginRight: '0.2rem' }}
+                className="button-secondary button"
+                title="Add sub-folder"
+              >📁</button>
+              <button onClick={(e) => { e.stopPropagation(); startEditingFolder(folder); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginRight: '0.2rem' }} className="button-secondary button" title="Rename folder">✏️</button>
+              <button onClick={(e) => { e.stopPropagation(); deleteFolder(collection, folder); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} className="button-secondary button" title="Delete folder">🗑️</button>
+            </>
+          )}
+        </div>
+
+        {renderNewFolderForm(collection, folder.id, headerIndentRem + 1)}
+
+        {/* Nested sub-folders and this folder's own requests */}
+        {isFolderExpanded && (
+          <>
+            {folder.folders?.map(subFolder => renderFolder(collection, subFolder, depth + 1))}
+            {renderDropZone(collection.id, folder.id, 0, 'request')}
+            {folder.requests.map((request, reqIndex) => renderRequestRow(collection, request, reqIndex, folder.id, depth + 1))}
+          </>
         )}
       </div>
     );
@@ -844,7 +1075,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
                           <MenuItem icon="📁" label="Add Folder" onClick={() => {
                             setOpenMenuId(null);
-                            setNewFolderCollectionId(collection.id);
+                            setNewFolderTarget({ collectionId: collection.id, parentFolderId: null });
                             setNewFolderName('');
                             setExpandedCollections(prev => new Set([...prev, collection.id]));
                           }} />
@@ -866,370 +1097,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {expandedCollections.has(collection.id) && (
               <div>
-                {newFolderCollectionId === collection.id && (
-                  <div style={{ display: 'flex', gap: '0.5rem', padding: '0.35rem 0.5rem', borderTop: '1px solid #333' }}>
-                    <input
-                      type="text"
-                      placeholder="Folder name"
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      className="form-input"
-                      style={{ fontSize: '0.8rem', flex: 1 }}
-                      onKeyPress={(e) => e.key === 'Enter' && createFolder(collection)}
-                      autoFocus
-                    />
-                    <button className="button" onClick={() => createFolder(collection)} style={{ fontSize: '0.8rem', padding: '0.2rem 0.4rem' }}>✓</button>
-                    <button className="button-secondary button" onClick={() => { setNewFolderCollectionId(null); setNewFolderName(''); }} style={{ fontSize: '0.8rem', padding: '0.2rem 0.4rem' }}>✗</button>
-                  </div>
-                )}
+                {renderNewFolderForm(collection, null, 0.5)}
 
                 {/* Folders */}
                 {renderDropZone(collection.id, null, 0, 'folder')}
-                {collection.folders?.map((folder: CollectionFolder, folderIndex: number) => {
-                  const isFolderExpanded = expandedFolders.has(folder.id);
-                  const isFolderDragging = dragItem?.id === folder.id;
-                  const isFolderDropTarget = dropFolderHighlight === folder.id;
-                  return (
-                    <div key={folder.id}>
-                      {/* Folder header row — draggable */}
-                      <div
-                        draggable={editingFolder !== folder.id}
-                        onDragStart={(e) => handleDragStart(e, 'folder', folder.id, collection.id, null)}
-                        onDragEnd={handleDragEnd}
-                        onDragOver={(e) => handleDragOverFolder(e, folder.id)}
-                        onDragLeave={(e) => {
-                          e.stopPropagation();
-                          if (dropFolderHighlight === folder.id) setDropFolderHighlight(null);
-                        }}
-                        onDrop={(e) => handleDropOnFolder(e, collection.id, folder)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          padding: '0.35rem 0.5rem 0.35rem 0.25rem',
-                          userSelect: 'none',
-                          borderTop: '1px solid #333',
-                          opacity: isFolderDragging ? 0.4 : 1,
-                          backgroundColor: isFolderDropTarget ? '#0d737720' : 'transparent',
-                          outline: isFolderDropTarget ? '1px solid #0d7377' : 'none',
-                          borderRadius: isFolderDropTarget ? '3px' : '0',
-                          cursor: editingFolder !== folder.id ? 'grab' : 'default',
-                        }}
-                      >
-                        {editingFolder !== folder.id && (
-                          <span style={{ color: '#555', fontSize: '0.85rem', padding: '0 4px', flexShrink: 0, userSelect: 'none', pointerEvents: 'none' }}>⠿</span>
-                        )}
-                        <div
-                          onClick={() => { if (editingFolder !== folder.id) toggleFolder(folder.id); }}
-                          style={{ display: 'flex', alignItems: 'center', flex: 1, cursor: editingFolder === folder.id ? 'default' : 'pointer', minWidth: 0, overflow: 'hidden' }}
-                        >
-                          <span style={{ marginRight: '0.5rem', flexShrink: 0 }}>
-                            {isFolderExpanded ? '▼' : '▶'}
-                          </span>
-                          {editingFolder === folder.id ? (
-                            <input
-                              type="text"
-                              value={editName}
-                              onChange={(e) => setEditName(e.target.value)}
-                              className="form-input"
-                              style={{ fontSize: '0.85rem', flex: 1, marginRight: '0.25rem' }}
-                              onKeyPress={(e) => e.key === 'Enter' && saveFolderName(collection, folder)}
-                              onBlur={() => saveFolderName(collection, folder)}
-                              onClick={(e) => e.stopPropagation()}
-                              autoFocus
-                            />
-                          ) : (
-                            <span style={{ color: '#ccc', fontSize: '0.9rem', fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {folder.name}
-                            </span>
-                          )}
-                        </div>
-                        {editingFolder === folder.id ? (
-                          <>
-                            <button onClick={(e) => { e.stopPropagation(); saveFolderName(collection, folder); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} className="button">✓</button>
-                            <button onClick={(e) => { e.stopPropagation(); cancelEdit(); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }} className="button-secondary button">✗</button>
-                          </>
-                        ) : (
-                          <>
-                            <span style={{ color: '#555', fontSize: '0.7rem', marginRight: '0.3rem' }}>{folder.requests.length}</span>
-                            <button onClick={(e) => { e.stopPropagation(); startEditingFolder(folder); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginRight: '0.2rem' }} className="button-secondary button" title="Rename folder">✏️</button>
-                            <button onClick={(e) => { e.stopPropagation(); deleteFolder(collection, folder); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} className="button-secondary button" title="Delete folder">🗑️</button>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Requests inside this folder */}
-                      {isFolderExpanded && (
-                        <>
-                          {renderDropZone(collection.id, folder.id, 0, 'request')}
-                          {folder.requests.map((request, reqIndex) => {
-                            const reqSavedResponses = savedResponses.filter(s => s.requestId === request.id);
-                            const isReqExpanded = expandedRequests.has(request.id);
-                            const isReqDragging = dragItem?.id === request.id;
-                            return (
-                              <div key={request.id}>
-                                <div
-                                  className="request-item"
-                                  draggable={editingRequest !== request.id}
-                                  onDragStart={(e) => handleDragStart(e, 'request', request.id, collection.id, folder.id)}
-                                  onDragEnd={handleDragEnd}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    padding: '0.5rem 0.75rem 0.5rem 0.25rem',
-                                    cursor: editingRequest !== request.id ? 'grab' : 'default',
-                                    opacity: isReqDragging ? 0.4 : 1,
-                                    backgroundColor: activeRequest?.id === request.id ? '#0d737720' : 'transparent',
-                                  }}
-                                  onClick={() => { if (editingRequest !== request.id) onSelectRequest(request); }}
-                                >
-                                  {editingRequest !== request.id && (
-                                    <span style={{ color: '#555', fontSize: '0.85rem', padding: '0 4px 0 1.5rem', flexShrink: 0, userSelect: 'none', pointerEvents: 'none' }}>⠿</span>
-                                  )}
-                                  {editingRequest === request.id ? (
-                                    <>
-                                      <span className={`http-method ${request.method}`} style={{ marginRight: '0.5rem' }}>
-                                        {request.method}
-                                      </span>
-                                      <input
-                                        type="text"
-                                        value={editName}
-                                        onChange={(e) => setEditName(e.target.value)}
-                                        className="form-input"
-                                        style={{ fontSize: '0.9rem', flex: 1, marginRight: '0.5rem' }}
-                                        onKeyPress={(e) => e.key === 'Enter' && saveRequestName(collection, request)}
-                                        onBlur={() => saveRequestName(collection, request)}
-                                        onClick={(e) => e.stopPropagation()}
-                                        autoFocus
-                                      />
-                                      <button onClick={(e) => { e.stopPropagation(); saveRequestName(collection, request); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} className="button">✓</button>
-                                      <button onClick={(e) => { e.stopPropagation(); cancelEdit(); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }} className="button-secondary button">✗</button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                                        {reqSavedResponses.length > 0 && (
-                                          <button onClick={(e) => { e.stopPropagation(); toggleRequest(request.id); }} style={{ background: 'none', border: 'none', color: '#888', padding: '0', cursor: 'pointer', fontSize: '0.6rem', flexShrink: 0 }} title="Toggle saved responses">
-                                            {isReqExpanded ? '▼' : '▶'}
-                                          </button>
-                                        )}
-                                        <span className={`http-method ${request.method}`}>{request.method}</span>
-                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{request.name}</span>
-                                      </div>
-                                      <div style={{ position: 'relative' }}>
-                                        <button onClick={(e) => openMenu(e, `req-${request.id}`)} className="button-secondary button" style={{ fontSize: '0.8rem', padding: '0.15rem 0.4rem', letterSpacing: '0.05em' }} title="More actions">···</button>
-                                        {openMenuId === `req-${request.id}` && menuPos && (
-                                          <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
-                                            <MenuItem icon="✏️" label="Rename" onClick={() => { setOpenMenuId(null); startEditingRequest(request); }} />
-                                            <MenuItem icon="⿻" label="Duplicate" onClick={() => { setOpenMenuId(null); duplicateRequest(collection, request, folder.id); }} />
-                                            <MenuItem icon="→" label="Copy to Workspace" onClick={() => { setOpenMenuId(null); onCopyToWorkspace(request); }} />
-                                            <MenuDivider />
-                                            <MenuItem icon="🗑️" label="Delete" onClick={() => { setOpenMenuId(null); deleteRequest(collection, request.id, request.name); }} destructive />
-                                          </div>
-                                        )}
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
-                                {isReqExpanded && reqSavedResponses.length > 0 && (
-                                  <div style={{ paddingLeft: '2.5rem' }}>
-                                    {reqSavedResponses.map(saved => (
-                                      <div
-                                        key={saved.id}
-                                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.3rem 0.5rem', cursor: 'pointer', borderLeft: '2px solid #0d7377', marginBottom: '2px', borderRadius: '0 4px 4px 0', backgroundColor: activeSavedResponse?.id === saved.id ? '#0d737720' : 'transparent' }}
-                                        onClick={() => { if (editingSavedResponse !== saved.id) onSelectSavedResponse(saved); }}
-                                      >
-                                        {editingSavedResponse === saved.id ? (
-                                          <>
-                                            <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="form-input" style={{ fontSize: '0.8rem', flex: 1, marginRight: '0.5rem' }} onKeyPress={(e) => e.key === 'Enter' && saveSavedResponseName(saved.id)} onBlur={() => saveSavedResponseName(saved.id)} onClick={(e) => e.stopPropagation()} autoFocus />
-                                            <button onClick={(e) => { e.stopPropagation(); saveSavedResponseName(saved.id); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }} className="button">✓</button>
-                                            <button onClick={(e) => { e.stopPropagation(); cancelEdit(); }} style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }} className="button-secondary button">✗</button>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <span style={{ fontSize: '0.8rem', color: activeSavedResponse?.id === saved.id ? '#0d9e9e' : '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>↳ {saved.name}</span>
-                                            <button onClick={(e) => { e.stopPropagation(); setEditingSavedResponse(saved.id); setEditName(saved.name); }} style={{ fontSize: '0.65rem', padding: '0.15rem 0.3rem', marginRight: '0.2rem', flexShrink: 0 }} className="button-secondary button" title="Rename saved response">✏️</button>
-                                            <button onClick={(e) => { e.stopPropagation(); onDeleteSavedResponse(saved.id); }} style={{ fontSize: '0.65rem', padding: '0.15rem 0.3rem', flexShrink: 0 }} className="button-secondary button" title="Delete saved response">🗑️</button>
-                                          </>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                {renderDropZone(collection.id, folder.id, reqIndex + 1, 'request')}
-                              </div>
-                            );
-                          })}
-                        </>
-                      )}
-
-                      {/* Folder drop zone after this folder (for reordering) */}
-                      {renderDropZone(collection.id, null, folderIndex + 1, 'folder')}
-                    </div>
-                  );
-                })}
+                {collection.folders?.map((folder: CollectionFolder, folderIndex: number) => (
+                  <React.Fragment key={folder.id}>
+                    {renderFolder(collection, folder, 0)}
+                    {renderDropZone(collection.id, null, folderIndex + 1, 'folder')}
+                  </React.Fragment>
+                ))}
 
                 {/* Top-level requests in collection */}
                 {renderDropZone(collection.id, null, 0, 'request')}
-                {collection.requests.map((request, reqIndex) => {
-                  const reqSavedResponses = savedResponses.filter(s => s.requestId === request.id);
-                  const isExpanded = expandedRequests.has(request.id);
-                  const isReqDragging = dragItem?.id === request.id;
-                  return (
-                    <div key={request.id}>
-                      <div
-                        className="request-item"
-                        draggable={editingRequest !== request.id}
-                        onDragStart={(e) => handleDragStart(e, 'request', request.id, collection.id, null)}
-                        onDragEnd={handleDragEnd}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '0.5rem 0.75rem 0.5rem 0.25rem',
-                          cursor: editingRequest !== request.id ? 'grab' : 'default',
-                          opacity: isReqDragging ? 0.4 : 1,
-                          backgroundColor: activeRequest?.id === request.id ? '#0d737720' : 'transparent',
-                        }}
-                        onClick={() => { if (editingRequest !== request.id) onSelectRequest(request); }}
-                      >
-                        {editingRequest !== request.id && (
-                          <span style={{ color: '#555', fontSize: '0.85rem', padding: '0 4px', flexShrink: 0, userSelect: 'none', pointerEvents: 'none' }}>⠿</span>
-                        )}
-                        {editingRequest === request.id ? (
-                          <>
-                            <span className={`http-method ${request.method}`} style={{ marginRight: '0.5rem' }}>
-                              {request.method}
-                            </span>
-                            <input
-                              type="text"
-                              value={editName}
-                              onChange={(e) => setEditName(e.target.value)}
-                              className="form-input"
-                              style={{ fontSize: '0.9rem', flex: 1, marginRight: '0.5rem' }}
-                              onKeyPress={(e) => e.key === 'Enter' && saveRequestName(collection, request)}
-                              onBlur={() => saveRequestName(collection, request)}
-                              onClick={(e) => e.stopPropagation()}
-                              autoFocus
-                            />
-                            <button
-                              onClick={(e) => { e.stopPropagation(); saveRequestName(collection, request); }}
-                              style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                              className="button"
-                            >✓</button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); cancelEdit(); }}
-                              style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }}
-                              className="button-secondary button"
-                            >✗</button>
-                          </>
-                        ) : (
-                          <>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                              {reqSavedResponses.length > 0 && (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); toggleRequest(request.id); }}
-                                  style={{ background: 'none', border: 'none', color: '#888', padding: '0', cursor: 'pointer', fontSize: '0.6rem', flexShrink: 0 }}
-                                  title="Toggle saved responses"
-                                >
-                                  {isExpanded ? '▼' : '▶'}
-                                </button>
-                              )}
-                              <span className={`http-method ${request.method}`}>{request.method}</span>
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{request.name}</span>
-                            </div>
-                            <div style={{ position: 'relative' }}>
-                              <button onClick={(e) => openMenu(e, `req-${request.id}`)} className="button-secondary button" style={{ fontSize: '0.8rem', padding: '0.15rem 0.4rem', letterSpacing: '0.05em' }} title="More actions">···</button>
-                              {openMenuId === `req-${request.id}` && menuPos && (
-                                <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
-                                  <MenuItem icon="✏️" label="Rename" onClick={() => { setOpenMenuId(null); startEditingRequest(request); }} />
-                                  <MenuItem icon="⿻" label="Duplicate" onClick={() => { setOpenMenuId(null); duplicateRequest(collection, request); }} />
-                                  <MenuItem icon="→" label="Copy to Workspace" onClick={() => { setOpenMenuId(null); onCopyToWorkspace(request); }} />
-                                  <MenuDivider />
-                                  <MenuItem icon="🗑️" label="Delete" onClick={() => { setOpenMenuId(null); deleteRequest(collection, request.id, request.name); }} destructive />
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        )}
-                      </div>
-
-                      {isExpanded && reqSavedResponses.length > 0 && (
-                        <div style={{ paddingLeft: '1.5rem' }}>
-                          {reqSavedResponses.map(saved => (
-                            <div
-                              key={saved.id}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                padding: '0.3rem 0.5rem',
-                                cursor: 'pointer',
-                                borderLeft: `2px solid #0d7377`,
-                                marginBottom: '2px',
-                                borderRadius: '0 4px 4px 0',
-                                backgroundColor: activeSavedResponse?.id === saved.id ? '#0d737720' : 'transparent',
-                              }}
-                              onClick={() => { if (editingSavedResponse !== saved.id) onSelectSavedResponse(saved); }}
-                            >
-                              {editingSavedResponse === saved.id ? (
-                                <>
-                                  <input
-                                    type="text"
-                                    value={editName}
-                                    onChange={(e) => setEditName(e.target.value)}
-                                    className="form-input"
-                                    style={{ fontSize: '0.8rem', flex: 1, marginRight: '0.5rem' }}
-                                    onKeyPress={(e) => e.key === 'Enter' && saveSavedResponseName(saved.id)}
-                                    onBlur={() => saveSavedResponseName(saved.id)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    autoFocus
-                                  />
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); saveSavedResponseName(saved.id); }}
-                                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem' }}
-                                    className="button"
-                                  >✓</button>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); cancelEdit(); }}
-                                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', marginLeft: '0.25rem' }}
-                                    className="button-secondary button"
-                                  >✗</button>
-                                </>
-                              ) : (
-                                <>
-                                  <span style={{
-                                    fontSize: '0.8rem',
-                                    color: activeSavedResponse?.id === saved.id ? '#0d9e9e' : '#aaa',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                    flex: 1,
-                                  }}>
-                                    ↳ {saved.name}
-                                  </span>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); setEditingSavedResponse(saved.id); setEditName(saved.name); }}
-                                    style={{ fontSize: '0.65rem', padding: '0.15rem 0.3rem', marginRight: '0.2rem', flexShrink: 0 }}
-                                    className="button-secondary button"
-                                    title="Rename saved response"
-                                  >✏️</button>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); onDeleteSavedResponse(saved.id); }}
-                                    style={{ fontSize: '0.65rem', padding: '0.15rem 0.3rem', flexShrink: 0 }}
-                                    className="button-secondary button"
-                                    title="Delete saved response"
-                                  >🗑️</button>
-                                </>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {renderDropZone(collection.id, null, reqIndex + 1, 'request')}
-                    </div>
-                  );
-                })}
+                {collection.requests.map((request, reqIndex) => renderRequestRow(collection, request, reqIndex, null, 0))}
 
                 {/* Runners for this collection */}
                 {runners.filter(r => r.collectionId === collection.id).map(runner => (

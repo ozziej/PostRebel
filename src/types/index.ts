@@ -33,6 +33,7 @@ export interface CollectionFolder {
   id: string;
   name: string;
   requests: ApiRequest[];
+  folders?: CollectionFolder[]; // Nested sub-folders, arbitrary depth
 }
 
 export interface Collection {

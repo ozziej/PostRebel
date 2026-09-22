@@ -30,7 +30,7 @@ A local API testing tool with git support - your Postman alternative.
 - **Local secret scanner** - A ⚠️ warning appears next to any header, environment variable, or form-data value that looks like a real secret (AWS/GitHub/Slack/Stripe/Google tokens, PEM blocks, JWTs, hardcoded Bearer tokens, or a suspiciously-named field) but isn't marked as secret
 - **Request history** - Per-request execution log showing status, timing, and size; persisted per workspace and auto-pruned to a configurable maximum
 - **Saved responses** - Snapshot and name any response for future reference; saved responses are listed under their parent request in the sidebar
-- **Collection folders** - Group requests inside a collection; add folders manually or have them created automatically on OpenAPI import (one folder per tag); drag and drop to reorder and move requests between folders
+- **Collection folders** - Group requests inside a collection, with sub-folders nested at any depth; add folders manually or have them created automatically on OpenAPI import (one folder per tag); drag and drop to reorder and move requests between folders at any depth
 - **Collection authentication** — set Bearer, Basic, or JWT auth once at the collection level; individual requests inherit it with "Inherit from Collection"; **Save & Apply to All** button sets every request in the collection to inherit in one click
 - **Copy response** - Copy the full formatted response body to the clipboard with one click (📋 Copy button)
 - **Find in request/response** - `Cmd+F` / `Ctrl+F` searches across all request and response content with plain text, case-sensitive, whole-word, and regex modes
@@ -510,16 +510,17 @@ Folders group related requests inside a collection.
 
 - Create folders manually with the **+ Add Folder** button on a collection, or have them created automatically when importing an OpenAPI spec (one folder per tag).
 - Click a folder header to expand or collapse it (arrow tip-down = open, tip-right = closed).
-- Rename a folder with ✏️ or delete it with 🗑️. Deleting a folder warns you how many requests it contains.
-- Requests inside folders support the same rename, delete, and saved-response features as top-level requests.
+- Rename a folder with ✏️ or delete it with 🗑️. Deleting a folder warns you how many requests it contains (including any in nested sub-folders).
+- **Sub-folders** — click 📁 on any folder to add a sub-folder inside it, at any depth. Sub-folders render before their parent's own requests, and indent further at each level.
+- Requests inside folders (at any depth) support the same rename, delete, and saved-response features as top-level requests.
 
 ### Drag and Drop
 
 Reorder and organise requests and folders by dragging items in the sidebar.
 
-- **Reorder requests** within a folder or at the collection root by dragging them up and down.
-- **Move requests between folders** by dragging a request onto a different folder.
-- **Reorder folders** within a collection by dragging the folder header.
+- **Reorder requests** within a folder (at any depth) or at the collection root by dragging them up and down.
+- **Move requests between folders** — including into or out of nested sub-folders — by dragging a request onto a different folder.
+- **Reorder folders** at the collection root by dragging the folder header. Nested folders can be created/renamed/deleted at any depth, but reordering a nested folder among its siblings isn't supported via drag yet — only top-level folders can be dragged to reorder.
 
 ### Request Body Types
 
@@ -636,6 +637,7 @@ npm run dist         # Create distributable packages
 - ✅ **Expanded `pm` script API** - `pm.sendRequest(urlOrRequestObject, callback)` fires an HTTP request from a pre-request/test script (e.g. to fetch a fresh token) and waits for the callback before the script is considered finished; `pm.collectionVariables.get/set` reads and writes a `Collection`-scoped variable bag; `pm.globals.get/set` reads and writes an in-memory, app-session-scoped variable bag shared by every script execution. `pm.globals` remains in-memory only (cleared on restart).
 - ✅ **Collection Variables editor** - Collection-scoped variables (the ones `pm.collectionVariables` reads/writes) now have their own editor — **Edit Variables** in a collection's **···** menu — with the same secret-marking, sort, and bulk-edit support as the Environment editor. Importing a Postman v2 collection with a top-level `variable[]` array now populates these directly (in addition to the existing synthetic `"<name> Variables"` Environment, kept for `{{variable}}` substitution compatibility), and exporting a collection writes them back out as Postman's own `variable[]` array.
 - ✅ **Persistent request/response console** - The **Console** tab in the response panel now shows a DevTools-style log that accumulates across every ad-hoc request sent this session (not reset when you switch requests or send a new one) — capped at the most recent 500 entries. Each sent request logs its fully-resolved method/URL/headers (variables substituted, auth headers included) and its response status/timing; pre-request and test script `console.log`/`console.warn`/`console.error` output is interleaved in the same log, color-coded by level, with real per-entry timestamps. **Clear** resets it.
+- ✅ **Nested collection folders** - Folders can now contain sub-folders at any depth — use the 📁 **Add sub-folder** button on any folder header. Request counts, rename, delete, drag-and-drop (dragging a request into/out of any folder, at any depth), Postman import/export (nested `item[]`), and OpenAPI export (nested folders become a `"Parent/Child"` tag path) all work recursively. One deliberate limitation: dragging a *folder* to reorder it only works at the collection root today — a nested folder's own position among its siblings can't be changed via drag yet (create/rename/delete still work at any depth).
 
 🚧 **Planned:**
 - Workspace templates
@@ -646,13 +648,12 @@ npm run dist         # Create distributable packages
 **Design principle: stay local-first.** PostRebel will not grow a cloud account, hosted sync, or team-server component — that's the single biggest recurring complaint about Postman (forced login just to save a collection, "always online" requirements, tightening free-tier pricing). Everything below should work fully offline, with git as the only sharing mechanism.
 
 **From a Bruno/Postman feature comparison, in priority order:**
-1. **Nested collection folders** - Both Bruno and Postman support arbitrary folder nesting; PostRebel is one level only today.
-2. **Headless CLI runner** - `postrebel run <collection> --env staging` producing JUnit/JSON output, reusing the existing Collection Runner execution engine without Electron/GUI. This is the main reason teams pick Bruno over Postman for CI.
-3. **OAuth2 auth type** (Authorization Code + PKCE, Client Credentials) - The biggest real-world auth gap. Needs an Electron-native redirect strategy (loopback `127.0.0.1` server + system browser, and/or a custom URI scheme) rather than depending on any hosted relay service.
-4. **GraphQL request support** - Query editor, variables pane, and schema introspection on URL entry.
-5. **Data-file-driven runs** - Run a request/flow once per row of an external CSV/JSON file, distinct from the existing For Each node (which iterates response data, not an external file).
-6. **OpenAPI drift check** - Re-importing a spec into an existing collection shows an added/removed/changed diff instead of blindly merging.
-7. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
+1. **Headless CLI runner** - `postrebel run <collection> --env staging` producing JUnit/JSON output, reusing the existing Collection Runner execution engine without Electron/GUI. This is the main reason teams pick Bruno over Postman for CI.
+2. **OAuth2 auth type** (Authorization Code + PKCE, Client Credentials) - The biggest real-world auth gap. Needs an Electron-native redirect strategy (loopback `127.0.0.1` server + system browser, and/or a custom URI scheme) rather than depending on any hosted relay service.
+3. **GraphQL request support** - Query editor, variables pane, and schema introspection on URL entry.
+4. **Data-file-driven runs** - Run a request/flow once per row of an external CSV/JSON file, distinct from the existing For Each node (which iterates response data, not an external file).
+5. **OpenAPI drift check** - Re-importing a spec into an existing collection shows an added/removed/changed diff instead of blindly merging.
+6. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
 
 Explicitly out of scope as a result of the local-first principle: mock servers, monitors/scheduled runs, team SSO/SCIM, or any other feature that requires a hosted service.
 

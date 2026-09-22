@@ -20,6 +20,7 @@ import {
 } from '../types';
 import { StartNode, RequestNode, EndNode, DelayNode, ForEachNode, DebugNode, RetryNode, SetVariableNode } from './RunnerNodes';
 import { executeRunner } from '../utils/runnerExecutor';
+import { flattenRequests, findRequestById } from '../utils/collectionTree';
 
 // Node types must be defined outside the component to avoid re-creation on render
 const nodeTypes: NodeTypes = {
@@ -320,10 +321,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     toastTimerRef.current = setTimeout(() => setSaveToast(false), 2000);
   }, []);
 
-  const allRequests: ApiRequest[] = [
-    ...collection.requests,
-    ...(collection.folders?.flatMap(f => f.requests) || []),
-  ];
+  const allRequests: ApiRequest[] = flattenRequests(collection);
 
   const findRequest = useCallback((requestId: string) =>
     allRequests.find(r => r.id === requestId),
@@ -616,11 +614,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
 
   const handleSaveRetryConfig = useCallback(() => {
     if (!retryConfigNodeId) return;
-    const allRequests = [
-      ...collection.requests,
-      ...(collection.folders || []).flatMap(f => f.requests),
-    ];
-    const req = allRequests.find(r => r.id === retryRequestIdDraft);
+    const req = findRequestById(collection, retryRequestIdDraft);
     setNodes(prev => prev.map(n => n.id !== retryConfigNodeId ? n : {
       ...n,
       data: {
@@ -1918,10 +1912,7 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
 
       {/* Retry config dialog */}
       {retryConfigNodeId && (() => {
-        const allRequests = [
-          ...collection.requests,
-          ...(collection.folders || []).flatMap(f => f.requests),
-        ];
+        const allRequests = flattenRequests(collection);
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
             <div style={{ background: '#1a1a1a', border: '1px solid #444', borderRadius: 8, width: 480, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>

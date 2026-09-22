@@ -96,6 +96,31 @@ describe('exportOpenApi', () => {
     expect(spec.paths['/users'].get.tags).toEqual(['Users']);
   });
 
+  it('tags a request in a nested sub-folder with its "Parent/Child" path', () => {
+    const collection: Collection = {
+      id: '1',
+      name: 'API',
+      requests: [],
+      folders: [
+        {
+          id: 'f1',
+          name: 'Users',
+          requests: [],
+          folders: [
+            {
+              id: 'f2',
+              name: 'Admin',
+              requests: [{ id: 'r1', name: 'Ban User', method: 'POST', url: 'https://api.example.com/users/ban', headers: {} }],
+            },
+          ],
+        },
+      ],
+    };
+
+    const { spec } = exportOpenApi(collection);
+    expect(spec.paths['/users/ban'].post.tags).toEqual(['Users/Admin']);
+  });
+
   it('round-trips a simple collection through importOpenApi', () => {
     const collection: Collection = {
       id: '1',

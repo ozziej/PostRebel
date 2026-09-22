@@ -33,13 +33,17 @@ export function splitSecrets(data: any): SplitSecretsResult {
     });
   }
 
-  // Handle form data secrets in requests. This redacts on the cloned
-  // `publicData`, not the original `data` — mutating `data` here would leave
-  // `publicData` (the object written to the git-tracked file) holding the
-  // unredacted secret value, since it was already deep-cloned above.
-  if (publicData.requests) {
+  // Handle form data secrets in requests, including requests nested inside
+  // folders at any depth. This redacts on the cloned `publicData`, not the
+  // original `data` — mutating `data` here would leave `publicData` (the
+  // object written to the git-tracked file) holding the unredacted secret
+  // value, since it was already deep-cloned above.
+  if (publicData.requests || publicData.folders) {
     secrets.requests = {};
-    publicData.requests.forEach((req: any) => {
+    const allRequests: any[] = [...(publicData.requests || [])];
+    collectFolderRequests(publicData.folders, allRequests);
+
+    allRequests.forEach((req: any) => {
       if (req.body?.formData) {
         const secretParams: any = {};
         req.body.formData = req.body.formData.map((param: any) => {
@@ -57,4 +61,14 @@ export function splitSecrets(data: any): SplitSecretsResult {
   }
 
   return { public: publicData, secrets };
+}
+
+// Collects every request from a folder tree, at any depth, into `out` — the
+// same object references nested inside `folders`, so mutating an entry in
+// `out` mutates the tree in place.
+function collectFolderRequests(folders: any[] | undefined, out: any[]): void {
+  for (const folder of folders || []) {
+    out.push(...(folder.requests || []));
+    collectFolderRequests(folder.folders, out);
+  }
 }

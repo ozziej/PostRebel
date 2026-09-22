@@ -88,13 +88,13 @@ function parseTopLevelItems(items: any[], errors: string[]): { requests: ApiRequ
 
   for (const item of items) {
     if (item.item && Array.isArray(item.item)) {
-      // This is a folder — create a CollectionFolder
-      const folderRequests: ApiRequest[] = [];
-      flattenFolderItems(item.item, folderRequests, errors);
+      // This is a folder — recurse so nested sub-folders are preserved
+      const { requests: folderRequests, folders: subFolders } = parseTopLevelItems(item.item, errors);
       folders.push({
         id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
         name: item.name || 'Folder',
         requests: folderRequests,
+        folders: subFolders.length > 0 ? subFolders : undefined,
       });
     } else if (item.request) {
       // Top-level request (not inside any folder)
@@ -108,22 +108,6 @@ function parseTopLevelItems(items: any[], errors: string[]): { requests: ApiRequ
   }
 
   return { requests, folders };
-}
-
-function flattenFolderItems(items: any[], requests: ApiRequest[], errors: string[]): void {
-  for (const item of items) {
-    if (item.item && Array.isArray(item.item)) {
-      // Nested sub-folder — flatten into parent folder since CollectionFolder doesn't support nesting
-      flattenFolderItems(item.item, requests, errors);
-    } else if (item.request) {
-      try {
-        const apiRequest = parsePostmanRequest(item, item.name || 'Request', errors);
-        requests.push(apiRequest);
-      } catch (e: any) {
-        errors.push(`Failed to parse request "${item.name}": ${e.message}`);
-      }
-    }
-  }
 }
 
 function parsePostmanRequest(item: any, name: string, errors: string[]): ApiRequest {

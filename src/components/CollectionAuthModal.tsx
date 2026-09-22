@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Collection, Environment } from '../types';
 import { VariableInput } from './VariableInput';
+import { mapAllRequests } from '../utils/collectionTree';
 
 interface CollectionAuthModalProps {
   collection: Collection | null;
@@ -53,14 +54,7 @@ export const CollectionAuthModal: React.FC<CollectionAuthModalProps> = ({
     try {
       const inherit = { type: 'inherit' as const };
       const base = buildUpdatedCollection();
-      const withInherit = {
-        ...base,
-        requests: base.requests.map(r => ({ ...r, auth: inherit })),
-        folders: base.folders?.map(f => ({
-          ...f,
-          requests: f.requests.map(r => ({ ...r, auth: inherit })),
-        })),
-      };
+      const withInherit = mapAllRequests(base, r => ({ ...r, auth: inherit }));
       await onSave(withInherit);
       onClose();
     } catch (error) {

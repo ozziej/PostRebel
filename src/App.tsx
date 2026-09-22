@@ -20,6 +20,7 @@ import { DEFAULT_SHORTCUTS, KeyboardShortcut, matchesShortcut } from './utils/ke
 import { HttpService } from './utils/httpService';
 import { ScriptRunner } from './utils/scriptRunner';
 import { appendLogEntry } from './utils/consoleLog';
+import { collectionContainsRequest, findRequestById, removeRequestById, updateRequestById } from './utils/collectionTree';
 import './App.css';
 
 function App() {
@@ -241,32 +242,14 @@ function App() {
   };
 
   const deleteRequest = async (collectionId: string, requestId: string) => {
-    setCollections(prev => prev.map(collection => {
-      if (collection.id === collectionId) {
-        return {
-          ...collection,
-          requests: collection.requests.filter(r => r.id !== requestId),
-          folders: collection.folders?.map(f => ({
-            ...f,
-            requests: f.requests.filter(r => r.id !== requestId),
-          })),
-        };
-      }
-      return collection;
-    }));
+    setCollections(prev => prev.map(collection =>
+      collection.id === collectionId ? removeRequestById(collection, requestId) : collection
+    ));
 
     // Save updated collection
     const collection = collections.find(c => c.id === collectionId);
     if (collection) {
-      const updatedCollection = {
-        ...collection,
-        requests: collection.requests.filter(r => r.id !== requestId),
-        folders: collection.folders?.map(f => ({
-          ...f,
-          requests: f.requests.filter(r => r.id !== requestId),
-        })),
-      };
-      await saveCollection(updatedCollection);
+      await saveCollection(removeRequestById(collection, requestId));
     }
 
     return { success: true };
@@ -302,19 +285,14 @@ function App() {
   };
 
   const handleRequestChange = async (updatedRequest: ApiRequest) => {
-    // Find the collection containing this request (top-level or inside a folder)
-    const collection = collections.find(c =>
-      c.requests.some(r => r.id === updatedRequest.id) ||
-      c.folders?.some(f => f.requests.some(r => r.id === updatedRequest.id))
-    );
+    // Find the collection containing this request, at any depth
+    const collection = collections.find(c => collectionContainsRequest(c, updatedRequest.id));
 
     // Preserve the name from the collection's current state.
     // Renames go through the sidebar directly (onSaveCollection) and don't update
     // activeRequest/localRequest, so updatedRequest.name may be stale. Always
     // prefer the name already stored in the collection to avoid overwriting it.
-    const currentInCollection =
-      collection?.requests.find(r => r.id === updatedRequest.id) ??
-      collection?.folders?.flatMap(f => f.requests).find(r => r.id === updatedRequest.id);
+    const currentInCollection = collection && findRequestById(collection, updatedRequest.id);
 
     const merged = currentInCollection
       ? { ...updatedRequest, name: currentInCollection.name }
@@ -323,15 +301,7 @@ function App() {
     setActiveRequest(merged);
 
     if (collection) {
-      const updatedCollection = {
-        ...collection,
-        requests: collection.requests.map(r => r.id === merged.id ? merged : r),
-        folders: collection.folders?.map(f => ({
-          ...f,
-          requests: f.requests.map(r => r.id === merged.id ? merged : r),
-        })),
-      };
-      await saveCollection(updatedCollection);
+      await saveCollection(updateRequestById(collection, merged.id, () => merged));
       console.log('[App] Auto-saved request:', merged.name);
     }
   };
@@ -746,10 +716,7 @@ function App() {
     setTestResults([]);
 
     try {
-      const activeCollection = collections.find(c =>
-        c.requests.some(r => r.id === request.id) ||
-        c.folders?.some(f => f.requests.some(r => r.id === request.id))
-      ) || null;
+      const activeCollection = collections.find(c => collectionContainsRequest(c, request.id)) || null;
 
       // Execute pre-request script
       if (request.preRequestScript) {
@@ -950,10 +917,7 @@ function App() {
         <RequestPanel
           request={activeRequest}
           environment={activeEnvironment}
-          activeCollection={collections.find(c =>
-            c.requests.some(r => r.id === activeRequest?.id) ||
-            c.folders?.some(f => f.requests.some(r => r.id === activeRequest?.id))
-          ) || null}
+          activeCollection={(activeRequest && collections.find(c => collectionContainsRequest(c, activeRequest.id))) || null}
           onExecute={executeRequest}
           onRequestChange={handleRequestChange}
           onUpdateVariable={handleUpdateVariable}

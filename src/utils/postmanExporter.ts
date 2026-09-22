@@ -1,4 +1,4 @@
-import { Collection, ApiRequest, Environment } from '../types';
+import { Collection, CollectionFolder, ApiRequest, Environment } from '../types';
 
 function exportAuth(auth: ApiRequest['auth'] | Collection['auth']): any | undefined {
   if (!auth || auth.type === 'none') return { type: 'noauth' };
@@ -87,18 +87,23 @@ function exportRequestItem(request: ApiRequest): any {
   return item;
 }
 
+function exportFolderItem(folder: CollectionFolder): any {
+  const item: any[] = folder.requests.map(exportRequestItem);
+  for (const subFolder of folder.folders || []) {
+    item.push(exportFolderItem(subFolder));
+  }
+  return { name: folder.name, item };
+}
+
 /**
  * Converts a PostRebel Collection into a Postman v2.1 collection JSON object.
- * Folders are exported one level deep (PostRebel's own model has no nested folders).
+ * Folders (and any nested sub-folders) are exported as Postman's own nested `item[]` shape.
  */
 export function exportPostmanCollection(collection: Collection): any {
   const item: any[] = collection.requests.map(exportRequestItem);
 
   for (const folder of collection.folders || []) {
-    item.push({
-      name: folder.name,
-      item: folder.requests.map(exportRequestItem),
-    });
+    item.push(exportFolderItem(folder));
   }
 
   const postmanCollection: any = {

@@ -67,6 +67,70 @@ describe('exportPostmanCollection', () => {
     expect(exported.item[0].item[0].name).toBe('List');
   });
 
+  it('exports a sub-folder nested inside a folder as a nested Postman item', () => {
+    const collection: Collection = {
+      id: '1',
+      name: 'Coll',
+      requests: [],
+      folders: [
+        {
+          id: 'f1',
+          name: 'Users',
+          requests: [{ id: 'r1', name: 'List', method: 'GET', url: 'https://api.example.com/users', headers: {} }],
+          folders: [
+            {
+              id: 'f2',
+              name: 'Admin',
+              requests: [{ id: 'r2', name: 'Ban', method: 'POST', url: 'https://api.example.com/ban', headers: {} }],
+            },
+          ],
+        },
+      ],
+    };
+
+    const exported = exportPostmanCollection(collection);
+    const usersItem = exported.item[0];
+    expect(usersItem.name).toBe('Users');
+    // Users item[] contains its own request AND the nested Admin folder
+    expect(usersItem.item).toHaveLength(2);
+    expect(usersItem.item[0].name).toBe('List');
+    const adminItem = usersItem.item[1];
+    expect(adminItem.name).toBe('Admin');
+    expect(adminItem.item).toHaveLength(1);
+    expect(adminItem.item[0].name).toBe('Ban');
+  });
+
+  it('round-trips nested folders through importPostmanCollection', () => {
+    const collection: Collection = {
+      id: '1',
+      name: 'Coll',
+      requests: [],
+      folders: [
+        {
+          id: 'f1',
+          name: 'Users',
+          requests: [],
+          folders: [
+            {
+              id: 'f2',
+              name: 'Admin',
+              requests: [{ id: 'r2', name: 'Ban', method: 'POST', url: 'https://api.example.com/ban', headers: {} }],
+            },
+          ],
+        },
+      ],
+    };
+
+    const exported = exportPostmanCollection(collection);
+    const reimported = importPostmanCollection(JSON.stringify(exported));
+
+    const usersFolder = reimported.collection.folders![0];
+    expect(usersFolder.name).toBe('Users');
+    expect(usersFolder.folders).toHaveLength(1);
+    expect(usersFolder.folders![0].name).toBe('Admin');
+    expect(usersFolder.folders![0].requests.map(r => r.name)).toEqual(['Ban']);
+  });
+
   it('maps basic auth and omits auth for "none" and "inherit"', () => {
     const basicRequest: Collection = {
       id: '1', name: 'C', requests: [

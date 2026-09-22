@@ -1,8 +1,21 @@
-import { Collection, ApiRequest } from '../types';
+import { Collection, CollectionFolder, ApiRequest } from '../types';
 
 export interface OpenApiExportResult {
   spec: any;
   errors: string[];
+}
+
+// OpenAPI tags are a flat string per operation, unlike PostRebel's nested
+// folders — a nested folder's tag becomes its "Parent/Child" path so nesting
+// isn't silently lost, even though OpenAPI itself has no folder concept.
+function flattenWithTags(folders: CollectionFolder[], prefix: string): Array<{ request: ApiRequest; tag: string }> {
+  const result: Array<{ request: ApiRequest; tag: string }> = [];
+  for (const folder of folders) {
+    const tag = prefix ? `${prefix}/${folder.name}` : folder.name;
+    result.push(...folder.requests.map(request => ({ request, tag })));
+    result.push(...flattenWithTags(folder.folders || [], tag));
+  }
+  return result;
 }
 
 function splitUrl(url: string): { origin: string; pathAndQuery: string } {
@@ -114,7 +127,7 @@ export function exportOpenApi(collection: Collection): OpenApiExportResult {
 
   const allRequests: Array<{ request: ApiRequest; tag?: string }> = [
     ...collection.requests.map(request => ({ request })),
-    ...(collection.folders || []).flatMap(folder => folder.requests.map(request => ({ request, tag: folder.name }))),
+    ...flattenWithTags(collection.folders || [], ''),
   ];
 
   const originCounts = new Map<string, number>();

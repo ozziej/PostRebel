@@ -114,4 +114,46 @@ describe('splitSecrets', () => {
     expect(secrets.variables.authToken).toBe('collection-secret');
     expect(secrets.requests.r1.formData.apiKey).toBe('form-secret');
   });
+
+  it('redacts secret formData in a request nested two folders deep', () => {
+    const collection = {
+      id: 'c1',
+      name: 'My Collection',
+      requests: [],
+      folders: [
+        {
+          id: 'fA',
+          name: 'A',
+          requests: [],
+          folders: [
+            {
+              id: 'fB',
+              name: 'B',
+              requests: [
+                {
+                  id: 'r1',
+                  name: 'Nested Upload',
+                  method: 'POST',
+                  url: 'https://api.example.com/upload',
+                  headers: {},
+                  body: {
+                    type: 'form-data',
+                    data: '',
+                    formData: [{ key: 'apiKey', value: 'deeply-nested-secret', enabled: true, isSecret: true }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const { public: publicData, secrets } = splitSecrets(collection);
+
+    const nestedRequest = publicData.folders[0].folders[0].requests[0];
+    expect(nestedRequest.body.formData[0].value).toBe('');
+    expect(JSON.stringify(publicData)).not.toContain('deeply-nested-secret');
+    expect(secrets.requests.r1.formData.apiKey).toBe('deeply-nested-secret');
+  });
 });

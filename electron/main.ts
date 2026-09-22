@@ -708,6 +708,16 @@ async function ensureGitAtWorkspacesRoot(workspacesDir: string): Promise<void> {
   }
 }
 
+// Collects every request from a folder tree, at any depth, into `out` — the
+// same object references nested inside `folders`, so mutating an entry in
+// `out` mutates the tree in place.
+function collectFolderRequests(folders: any[] | undefined, out: any[]): void {
+  for (const folder of folders || []) {
+    out.push(...(folder.requests || []));
+    collectFolderRequests(folder.folders, out);
+  }
+}
+
 // Sanitize filename to be filesystem-safe
 function sanitizeFilename(name: string): string {
   return name
@@ -793,9 +803,12 @@ ipcMain.handle('load-collections', async (event, workspaceId) => {
           const secretsContent = await fs.readFile(path.join(collectionsDir, secretsFile), 'utf-8');
           const secrets = JSON.parse(secretsContent);
 
-          // Merge secrets back into collection
+          // Merge secrets back into collection, including requests nested
+          // inside folders at any depth
           if (secrets.requests) {
-            collection.requests.forEach((req: any) => {
+            const allRequests: any[] = [...collection.requests];
+            collectFolderRequests(collection.folders, allRequests);
+            allRequests.forEach((req: any) => {
               if (secrets.requests[req.id]?.formData) {
                 req.body.formData = req.body.formData.map((param: any) => {
                   if (param.isSecret && secrets.requests[req.id].formData[param.key]) {

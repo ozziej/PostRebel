@@ -3,6 +3,7 @@ import { Collection, Environment, ApiRequest } from '../types';
 import { importPostmanCollection, importPostmanEnvironment } from '../utils/postmanImporter';
 import { parseCurl } from '../utils/curlParser';
 import { importOpenApi } from '../utils/openApiImporter';
+import { countRequests } from '../utils/collectionTree';
 
 export type ImportTab = 'collection' | 'environment' | 'curl' | 'openapi';
 
@@ -187,10 +188,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     fontWeight: activeTab === tab ? 'bold' : 'normal',
   });
 
-  const totalRequestCount = (preview?.collection)
-    ? preview.collection.requests.length +
-      (preview.collection.folders || []).reduce((sum: number, f: any) => sum + f.requests.length, 0)
-    : 0;
+  const totalRequestCount = preview?.collection ? countRequests(preview.collection) : 0;
 
   return (
     <div style={{
@@ -304,7 +302,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#aaa' }}>
                     {(preview.collection.folders as any[]).map((f: any, i: number) => (
                       <span key={i} style={{ marginRight: '0.5rem', color: '#888' }}>
-                        ▸ {f.name} ({f.requests.length})
+                        ▸ {f.name} ({countRequests(f)})
                       </span>
                     ))}
                   </div>
@@ -557,7 +555,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#aaa' }}>
                     {(preview.collection.folders as any[]).map((f: any, i: number) => (
                       <span key={i} style={{ marginRight: '0.5rem', color: '#888' }}>
-                        ▸ {f.name} ({f.requests.length})
+                        ▸ {f.name} ({countRequests(f)})
                       </span>
                     ))}
                   </div>
