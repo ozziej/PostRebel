@@ -806,8 +806,26 @@ ipcMain.handle('load-collections', async (event, workspaceId) => {
               }
             });
           }
+
+          // Merge secrets back into collection-scoped variables
+          if (secrets.variables && collection.variablesArray) {
+            collection.variablesArray = collection.variablesArray.map((v: any) => {
+              if (v.isSecret && secrets.variables[v.key]) {
+                return { ...v, value: secrets.variables[v.key] };
+              }
+              return v;
+            });
+          }
         } catch {
           // No secrets file, continue
+        }
+
+        // Sync variablesArray → variables so pm.collectionVariables sees current values
+        if (collection.variablesArray) {
+          collection.variables = {};
+          collection.variablesArray.forEach((v: any) => {
+            collection.variables[v.key] = v.value;
+          });
         }
 
         collections.push(collection);

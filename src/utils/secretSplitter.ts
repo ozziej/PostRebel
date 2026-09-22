@@ -14,7 +14,10 @@ export function splitSecrets(data: any): SplitSecretsResult {
   const publicData = JSON.parse(JSON.stringify(data)); // deep clone
   const secrets: any = {};
 
-  // Handle environment variables
+  // Handle environment/collection variables. Secrets are redacted from both
+  // variablesArray AND the legacy flat `variables` map — leaving a secret's
+  // real value in `variables` would defeat the redaction entirely, since
+  // that flat map is written to the same git-tracked file.
   if (data.variablesArray) {
     publicData.variablesArray = [];
     secrets.variables = {};
@@ -23,6 +26,7 @@ export function splitSecrets(data: any): SplitSecretsResult {
       if (v.isSecret) {
         secrets.variables[v.key] = v.value;
         publicData.variablesArray.push({ key: v.key, value: '', isSecret: true });
+        if (publicData.variables) publicData.variables[v.key] = '';
       } else {
         publicData.variablesArray.push(v);
       }

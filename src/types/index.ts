@@ -40,7 +40,8 @@ export interface Collection {
   name: string;
   requests: ApiRequest[];
   folders?: CollectionFolder[];
-  variables?: Record<string, string>; // Collection-scoped script variables (pm.collectionVariables)
+  variables?: Record<string, string>; // Collection-scoped script variables (pm.collectionVariables) — legacy flat map, synced from variablesArray
+  variablesArray?: EnvironmentVariable[]; // New format with secret support (isSecret values are split into <name>.secrets.json, like environments)
   auth?: {
     type: 'none' | 'bearer' | 'basic' | 'jwt';
     bearer?: string;

@@ -76,6 +76,42 @@ describe('splitSecrets', () => {
     const { public: publicData, secrets } = splitSecrets(environment);
 
     expect(publicData.variablesArray).toEqual([{ key: 'token', value: '', isSecret: true }]);
+    // The legacy flat `variables` map is written to the same git-tracked file as
+    // variablesArray, so it must be redacted too — not just the array.
+    expect(publicData.variables.token).toBe('');
     expect(secrets.variables.token).toBe('abc123');
+  });
+
+  it('redacts secret collection-scoped variables alongside secret formData in the same collection', () => {
+    const collection = {
+      id: 'c1',
+      name: 'My Collection',
+      requests: [
+        {
+          id: 'r1',
+          name: 'Upload',
+          method: 'POST',
+          url: 'https://api.example.com/upload',
+          headers: {},
+          body: {
+            type: 'form-data',
+            data: '',
+            formData: [{ key: 'apiKey', value: 'form-secret', enabled: true, isSecret: true }],
+          },
+        },
+      ],
+      variables: { authToken: 'collection-secret' },
+      variablesArray: [{ key: 'authToken', value: 'collection-secret', isSecret: true }],
+    };
+
+    const { public: publicData, secrets } = splitSecrets(collection);
+
+    expect(publicData.variablesArray).toEqual([{ key: 'authToken', value: '', isSecret: true }]);
+    expect(publicData.requests[0].body.formData[0].value).toBe('');
+    expect(JSON.stringify(publicData)).not.toContain('collection-secret');
+    expect(JSON.stringify(publicData)).not.toContain('form-secret');
+
+    expect(secrets.variables.authToken).toBe('collection-secret');
+    expect(secrets.requests.r1.formData.apiKey).toBe('form-secret');
   });
 });
