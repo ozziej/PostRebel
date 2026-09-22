@@ -467,14 +467,12 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                 className="form-input"
                 style={{ flex: 1 }}
               />
-              {secretWarning && (
-                <span
-                  title={`This header value ${secretWarning.reason} but headers have no way to mark a value as secret — consider moving it into an environment variable marked 🔒 instead.`}
-                  style={{ fontSize: '1rem', cursor: 'help' }}
-                >
-                  ⚠️
-                </span>
-              )}
+              <span
+                title={secretWarning ? `This header value ${secretWarning.reason} but headers have no way to mark a value as secret — consider moving it into an environment variable marked 🔒 instead.` : undefined}
+                style={{ fontSize: '1rem', width: '1.2rem', flexShrink: 0, textAlign: 'center', cursor: secretWarning ? 'help' : 'default' }}
+              >
+                {secretWarning ? '⚠️' : ''}
+              </span>
               <button
                 onClick={() => {
                   const newHeaders = { ...localRequest.headers };

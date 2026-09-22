@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace, RequestHistoryEntry, SavedResponse, Runner } from './types';
+import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspace, RequestHistoryEntry, SavedResponse, Runner, RunnerLogEntry } from './types';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { CollectionAuthModal } from './components/CollectionAuthModal';
@@ -19,6 +19,7 @@ import { SearchBar, SearchOptions } from './components/SearchBar';
 import { DEFAULT_SHORTCUTS, KeyboardShortcut, matchesShortcut } from './utils/keyboardShortcuts';
 import { HttpService } from './utils/httpService';
 import { ScriptRunner } from './utils/scriptRunner';
+import { appendLogEntry } from './utils/consoleLog';
 import './App.css';
 
 function App() {
@@ -32,7 +33,12 @@ function App() {
   const [currentResponse, setCurrentResponse] = useState<ApiResponse | null>(null);
   const [responseCache, setResponseCache] = useState<Record<string, ApiResponse>>({});
   const [isLoading, setIsLoading] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
+  // Persistent, app-wide console log — accumulates across every ad-hoc
+  // request sent this session (not reset per-request), like a DevTools console.
+  const [consoleLog, setConsoleLog] = useState<RunnerLogEntry[]>([]);
+  const appendConsoleLog = useCallback((level: RunnerLogEntry['level'], message: string) => {
+    setConsoleLog(prev => appendLogEntry(prev, level, message));
+  }, []);
   const [testResults, setTestResults] = useState<Array<{ name: string; passed: boolean; error?: string }>>([]);
   const [showCertManager, setShowCertManager] = useState(false);
   const [showEnvEditor, setShowEnvEditor] = useState(false);
@@ -737,7 +743,6 @@ function App() {
 
     setIsLoading(true);
     setCurrentResponse(null);
-    setLogs([]);
     setTestResults([]);
 
     try {
@@ -753,15 +758,23 @@ function App() {
           activeEnvironment,
           { collection: activeCollection, certificates }
         );
-        setLogs(prev => [...prev, ...preScriptResult.logs]);
+        preScriptResult.logs.forEach(msg => appendConsoleLog('script', msg));
 
         if (!preScriptResult.success) {
-          setLogs(prev => [...prev, `Pre-request script error: ${preScriptResult.error}`]);
+          appendConsoleLog('error', `Pre-request script error: ${preScriptResult.error}`);
         }
       }
 
       // Make the HTTP request
-      const response = await HttpService.executeRequest(request, activeEnvironment, certificates, activeCollection);
+      const response = await HttpService.executeRequest(request, activeEnvironment, certificates, activeCollection, resolved => {
+        const headerLines = Object.entries(resolved.headers).map(([k, v]) => `  ${k}: ${v}`).join('\n');
+        appendConsoleLog('info', `→ ${resolved.method} ${resolved.url}${headerLines ? `\n${headerLines}` : ''}`);
+      });
+      const ok = response.status >= 200 && response.status < 400;
+      appendConsoleLog(
+        response.status === 0 ? 'error' : ok ? 'success' : 'warn',
+        `← ${response.status} ${response.statusText} (${response.time}ms)`
+      );
       setCurrentResponse(response);
       setResponseCache(prev => ({ ...prev, [request.id]: response }));
 
@@ -793,20 +806,18 @@ function App() {
           activeEnvironment,
           { collection: activeCollection, certificates }
         );
-        setLogs(prev => [...prev, ...testScriptResult.logs]);
+        testScriptResult.logs.forEach(msg => appendConsoleLog('script', msg));
 
         if (!testScriptResult.success) {
-          setLogs(prev => [...prev, `Test script error: ${testScriptResult.error}`]);
+          appendConsoleLog('error', `Test script error: ${testScriptResult.error}`);
         }
 
         setTestResults(testScriptResult.testResults || []);
       }
 
-      setLogs(prev => [...prev, `Request completed in ${response.time}ms`]);
-
     } catch (error: any) {
       // If we get here, it's an unexpected error (not an HTTP error)
-      setLogs(prev => [...prev, `Fatal Error: ${error.message}`]);
+      appendConsoleLog('error', `Fatal Error: ${error.message}`);
 
       // Show error in response panel
       const errorResponse: ApiResponse = {
@@ -962,7 +973,8 @@ function App() {
         {!activeRunner && (
           <ResponsePanel
             response={currentResponse}
-            logs={logs}
+            logs={consoleLog}
+            onClearConsole={() => setConsoleLog([])}
             isLoading={isLoading}
             activeSavedResponse={activeSavedResponse}
             onSaveResponse={handleSaveSavedResponse}

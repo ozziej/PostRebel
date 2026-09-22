@@ -1,11 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ApiResponse, SavedResponse } from '../types';
+import { ApiResponse, RunnerLogEntry, SavedResponse } from '../types';
 import { SearchOptions } from './SearchBar';
 import { findMatches, highlightText } from '../utils/searchHighlight';
 
+const CONSOLE_LEVEL_COLORS: Record<RunnerLogEntry['level'], string> = {
+  info: '#888',
+  success: '#4ade80',
+  warn: '#f59e0b',
+  error: '#f87171',
+  script: '#0d9e9e',
+};
+
 interface ResponsePanelProps {
   response: ApiResponse | null;
-  logs: string[];
+  logs: RunnerLogEntry[];
+  onClearConsole?: () => void;
   isLoading: boolean;
   activeSavedResponse?: SavedResponse | null;
   onSaveResponse?: (name: string) => void;
@@ -19,6 +28,7 @@ interface ResponsePanelProps {
 export const ResponsePanel: React.FC<ResponsePanelProps> = ({
   response,
   logs,
+  onClearConsole,
   isLoading,
   activeSavedResponse,
   onSaveResponse,
@@ -324,7 +334,7 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
       const offsets: number[] = [];
       logs.forEach(log => {
         offsets.push(offset);
-        offset += findMatches(log, searchTerm, searchOptions).length;
+        offset += findMatches(log.message, searchTerm, searchOptions).length;
       });
       return { total: offset, offsets };
     }
@@ -712,6 +722,17 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
               return <span style={{ background: '#22c55e', borderRadius: '10px', padding: '0.2rem 0.5rem', fontSize: '0.7rem', marginLeft: '0.5rem', color: '#fff' }}>✓</span>;
             })()}
           </button>
+          {activeTab === 'console' && onClearConsole && (
+            <button
+              onClick={onClearConsole}
+              disabled={logs.length === 0}
+              className="button-secondary button"
+              style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+              title="Clear the console log"
+            >
+              Clear
+            </button>
+          )}
         </div>
       </div>
 
@@ -818,15 +839,15 @@ export const ResponsePanel: React.FC<ResponsePanelProps> = ({
           <div className="logs">
             {logs.length === 0 ? (
               <div style={{ color: '#666', fontStyle: 'italic' }}>
-                No console output
+                No console output. Send a request to see it logged here — this persists across requests until cleared.
               </div>
             ) : (
               logs.map((log, index) => (
-                <div key={index} className="log-entry">
+                <div key={index} className="log-entry" style={{ color: CONSOLE_LEVEL_COLORS[log.level], whiteSpace: 'pre-wrap' }}>
                   <span style={{ color: '#888', marginRight: '0.5rem' }}>
-                    [{new Date().toLocaleTimeString()}]
+                    [{log.timestamp != null ? new Date(log.timestamp).toLocaleTimeString() : '--:--:--'}]
                   </span>
-                  {renderHighlightedText(log, tabMatchData.offsets[index] ?? 0)}
+                  {renderHighlightedText(log.message, tabMatchData.offsets[index] ?? 0)}
                 </div>
               ))
             )}

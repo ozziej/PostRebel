@@ -1,8 +1,14 @@
 import { ApiRequest, ApiResponse, Environment, Certificate, Collection } from '../types';
 import { resolveDynamicVariable } from './dynamicVariables';
 
+export interface ResolvedRequestInfo {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+}
+
 export class HttpService {
-  private static replaceVariables(text: string, environment: Environment): string {
+  static replaceVariables(text: string, environment: Environment): string {
     return text.replace(/\{\{([\w.$]+)\}\}/g, (match, varName) => {
       const dynamic = resolveDynamicVariable(varName);
       if (dynamic !== null) return dynamic;
@@ -26,7 +32,8 @@ export class HttpService {
     request: ApiRequest,
     environment: Environment,
     certificates: Certificate[] = [],
-    collection: Collection | null = null
+    collection: Collection | null = null,
+    onResolved?: (resolved: ResolvedRequestInfo) => void
   ): Promise<ApiResponse> {
     const startTime = Date.now();
 
@@ -180,6 +187,8 @@ export class HttpService {
       console.log('[HTTP Service] Body:', config.data);
       console.log('[HTTP Service] Body type:', typeof config.data);
       console.log('[HTTP Service] =====================================');
+
+      onResolved?.({ method: config.method.toUpperCase(), url: config.url, headers: config.headers });
 
       const result = await window.electronAPI.executeHttpRequest(config);
 

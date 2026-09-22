@@ -220,12 +220,12 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
                   {item.isSecret ? '🔒' : '🔓'}
                 </button>
               )}
-              {secretWarning && (
+              {allowSecrets && (
                 <span
-                  title={`This value ${secretWarning.reason} but isn't marked as secret — click 🔓 to mark it, so it's kept out of git.`}
-                  style={{ fontSize: '1rem', cursor: 'help' }}
+                  title={secretWarning ? `This value ${secretWarning.reason} but isn't marked as secret — click 🔓 to mark it, so it's kept out of git.` : undefined}
+                  style={{ fontSize: '1rem', width: '1.2rem', flexShrink: 0, textAlign: 'center', cursor: secretWarning ? 'help' : 'default' }}
                 >
-                  ⚠️
+                  {secretWarning ? '⚠️' : ''}
                 </span>
               )}
               <button
