@@ -46,7 +46,13 @@ export function importPostmanCollection(json: string): PostmanCollectionResult {
 
   const result: PostmanCollectionResult = { collection, errors };
 
-  // Handle collection-level variables
+  // Handle collection-level variables. These are written to both places:
+  // - `collection.variablesArray`/`variables`, so pm.collectionVariables.get/set
+  //   in imported scripts sees the values Postman intended for pm.collectionVariables.
+  // - a synthetic "<name> Variables" Environment, so the same values are also
+  //   available for {{variable}} substitution in URLs/headers/bodies, since
+  //   that resolution only reads from the active environment, not collection
+  //   variables.
   if (data.variable && Array.isArray(data.variable) && data.variable.length > 0) {
     const variables: Record<string, string> = {};
     const variablesArray: EnvironmentVariable[] = [];
@@ -61,6 +67,9 @@ export function importPostmanCollection(json: string): PostmanCollectionResult {
         });
       }
     }
+
+    collection.variables = variables;
+    collection.variablesArray = variablesArray;
 
     result.collectionVariables = {
       id: (Date.now() + 1).toString(),

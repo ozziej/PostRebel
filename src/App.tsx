@@ -3,6 +3,7 @@ import { Collection, Environment, ApiRequest, ApiResponse, Certificate, Workspac
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { CollectionAuthModal } from './components/CollectionAuthModal';
+import { CollectionVariablesEditor } from './components/CollectionVariablesEditor';
 import { ResizableSidebar } from './components/ResizableSidebar';
 import { RequestPanel } from './components/RequestPanel';
 import { ResponsePanel } from './components/ResponsePanel';
@@ -44,6 +45,8 @@ function App() {
   const [importModalTab, setImportModalTab] = useState<ImportTab>('collection');
   const [showCollectionAuthModal, setShowCollectionAuthModal] = useState(false);
   const [editingCollectionAuth, setEditingCollectionAuth] = useState<Collection | null>(null);
+  const [showCollectionVariablesModal, setShowCollectionVariablesModal] = useState(false);
+  const [editingCollectionVariables, setEditingCollectionVariables] = useState<Collection | null>(null);
   const [copyToWorkspaceRequest, setCopyToWorkspaceRequest] = useState<ApiRequest | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [requestHistory, setRequestHistory] = useState<RequestHistoryEntry[]>([]);
@@ -530,6 +533,16 @@ function App() {
     setEditingCollectionAuth(null);
   };
 
+  const handleEditCollectionVariables = (collection: Collection) => {
+    setEditingCollectionVariables(collection);
+    setShowCollectionVariablesModal(true);
+  };
+
+  const handleCloseCollectionVariablesModal = () => {
+    setShowCollectionVariablesModal(false);
+    setEditingCollectionVariables(null);
+  };
+
   const handleImportCurl = async (
     request: ApiRequest,
     collectionId: string | null,
@@ -912,6 +925,7 @@ function App() {
             onDeleteCollection={deleteCollection}
             onDeleteRequest={deleteRequest}
             onEditCollectionAuth={handleEditCollectionAuth}
+            onEditCollectionVariables={handleEditCollectionVariables}
             onSelectRunner={handleSelectRunner}
             onDeleteRunner={handleDeleteRunner}
             onRenameRunner={handleRenameRunner}
@@ -1034,6 +1048,13 @@ function App() {
         onClose={handleCloseCollectionAuthModal}
         onSave={saveCollection}
         onUpdateVariable={handleUpdateVariable}
+      />
+
+      <CollectionVariablesEditor
+        collection={editingCollectionVariables}
+        isOpen={showCollectionVariablesModal}
+        onClose={handleCloseCollectionVariablesModal}
+        onSave={saveCollection}
       />
       {copyToWorkspaceRequest && (
         <CopyToWorkspaceModal

@@ -112,6 +112,13 @@ export function exportPostmanCollection(collection: Collection): any {
   const auth = exportAuth(collection.auth);
   if (auth) postmanCollection.auth = auth;
 
+  if (collection.variablesArray && collection.variablesArray.length > 0) {
+    // Postman's collection-variable schema has no secret type (unlike
+    // environment `values[]`, which supports `type: "secret"`) — `type:
+    // "string"` is what Postman itself writes for plain variables.
+    postmanCollection.variable = collection.variablesArray.map(v => ({ key: v.key, value: v.value, type: 'string' }));
+  }
+
   return postmanCollection;
 }
 

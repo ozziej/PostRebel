@@ -1,24 +1,24 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Environment, KeyValuePair } from '../types';
+import { Collection, KeyValuePair } from '../types';
 import { KeyValueEditor } from './KeyValueEditor';
 import { toKeyValuePairs, fromKeyValuePairs } from '../utils/variableConversion';
 
-interface EnvironmentEditorProps {
+interface CollectionVariablesEditorProps {
   isOpen: boolean;
-  environment: Environment | null;
+  collection: Collection | null;
   onClose: () => void;
-  onSave: (environment: Environment) => Promise<any>;
+  onSave: (collection: Collection) => Promise<any>;
 }
 
-export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
+export const CollectionVariablesEditor: React.FC<CollectionVariablesEditorProps> = ({
   isOpen,
-  environment,
+  collection,
   onClose,
   onSave
 }) => {
   const [variablesData, setVariablesData] = useState<KeyValuePair[]>([]);
   const [isSaving, setIsSaving] = useState(false);
-  const [currentEnv, setCurrentEnv] = useState<Environment | null>(null);
+  const [currentCollection, setCurrentCollection] = useState<Collection | null>(null);
   const [toast, setToast] = useState('');
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -29,43 +29,41 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
   }, []);
 
   useEffect(() => {
-    if (isOpen && environment) {
-      setCurrentEnv(environment);
-      setVariablesData(toKeyValuePairs(environment.variablesArray, environment.variables));
+    if (isOpen && collection) {
+      setCurrentCollection(collection);
+      setVariablesData(toKeyValuePairs(collection.variablesArray, collection.variables));
     }
-  }, [isOpen, environment]);
+  }, [isOpen, collection]);
 
   const handleSave = async () => {
-    if (!currentEnv) return;
+    if (!currentCollection) return;
 
     setIsSaving(true);
     try {
       const { variablesArray, variables } = fromKeyValuePairs(variablesData);
 
-      const updatedEnv: Environment = {
-        ...currentEnv,
+      const updatedCollection: Collection = {
+        ...currentCollection,
         variables,
         variablesArray
       };
 
-      console.log('[EnvironmentEditor] Saving environment:', updatedEnv);
-      await onSave(updatedEnv);
+      await onSave(updatedCollection);
       triggerToast('Changes Saved');
       setTimeout(() => onClose(), 1200);
     } catch (error) {
-      console.error('Failed to save environment:', error);
-      alert('Failed to save environment');
+      console.error('Failed to save collection variables:', error);
+      alert('Failed to save collection variables');
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleVariablesChange = (data: KeyValuePair[]) => {
-    console.log('[EnvironmentEditor] Variables changed:', data);
     setVariablesData(data);
   };
 
-  if (!isOpen || !currentEnv) return null;
+  if (!isOpen || !currentCollection) return null;
 
   return (
     <div style={{
@@ -92,9 +90,9 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <div>
-            <h2>Environment Variables</h2>
+            <h2>Collection Variables</h2>
             <div style={{ fontSize: '0.9rem', color: '#888', marginTop: '0.25rem' }}>
-              {currentEnv.name}
+              {currentCollection.name}
             </div>
           </div>
           <button onClick={onClose} className="button-secondary button">✗</button>
@@ -102,13 +100,12 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
 
         <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: '#1a1a1a', borderRadius: '4px' }}>
           <div style={{ fontSize: '0.9rem', color: '#cccccc', marginBottom: '0.5rem' }}>
-            <strong>💡 How to use variables:</strong>
+            <strong>💡 How collection variables work:</strong>
           </div>
           <ul style={{ fontSize: '0.85rem', color: '#888', margin: '0.5rem 0', paddingLeft: '1.5rem', lineHeight: '1.6' }}>
-            <li>Use <code style={{ backgroundColor: '#2d2d2d', padding: '0.2rem 0.4rem', borderRadius: '3px', color: '#0d7377' }}>{'{{variable_name}}'}</code> anywhere in your requests</li>
-            <li>Works in: URLs, headers, body, form parameters, authentication</li>
-            <li>Example: <code style={{ backgroundColor: '#2d2d2d', padding: '0.2rem 0.4rem', borderRadius: '3px' }}>https://{'{{environment}}'}.company.com/api</code></li>
-            <li>Hover over variables in the UI to see their current values</li>
+            <li>Read and write these from scripts with <code style={{ backgroundColor: '#2d2d2d', padding: '0.2rem 0.4rem', borderRadius: '3px', color: '#0d7377' }}>pm.collectionVariables.get(key)</code> / <code style={{ backgroundColor: '#2d2d2d', padding: '0.2rem 0.4rem', borderRadius: '3px', color: '#0d7377' }}>.set(key, value)</code></li>
+            <li>Scoped to this collection only, shared by every request and script in it</li>
+            <li>Unlike environment variables, these aren't used for <code style={{ backgroundColor: '#2d2d2d', padding: '0.2rem 0.4rem', borderRadius: '3px' }}>{'{{variable}}'}</code> substitution in URLs/headers/bodies — they're script-only</li>
           </ul>
         </div>
 
@@ -117,19 +114,9 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
             allowSort={true}
             data={variablesData}
             onChange={handleVariablesChange}
-            placeholder={{ key: 'Variable name (e.g., api_key)', value: 'Variable value' }}
+            placeholder={{ key: 'Variable name (e.g., authToken)', value: 'Variable value' }}
             allowSecrets={true}
           />
-        </div>
-
-        <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#1a2d1a', borderRadius: '4px', border: '1px solid #0d7377' }}>
-          <div style={{ fontSize: '0.85rem', color: '#cccccc' }}>
-            <strong style={{ color: '#10b981' }}>🔒 Security Tip:</strong>
-            <p style={{ marginTop: '0.5rem', lineHeight: '1.5', color: '#888' }}>
-              Store sensitive values (passwords, API keys, tokens) in separate <code style={{ backgroundColor: '#2d2d2d', padding: '0.2rem 0.4rem', borderRadius: '3px' }}>*.local.json</code> files
-              which are automatically excluded from git. Your team can share variable names while keeping values private.
-            </p>
-          </div>
         </div>
 
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem', justifyContent: 'flex-end' }}>
@@ -147,40 +134,6 @@ export const EnvironmentEditor: React.FC<EnvironmentEditorProps> = ({
           >
             {isSaving ? 'Saving...' : 'Save Changes'}
           </button>
-        </div>
-
-        <div style={{ marginTop: '1.5rem', fontSize: '0.8rem', color: '#666', borderTop: '1px solid #404040', paddingTop: '1rem' }}>
-          <strong>Common Variables:</strong>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-            {['api_key', 'auth_token', 'base_url', 'environment', 'username', 'password'].map(varName => (
-              <code
-                key={varName}
-                style={{
-                  backgroundColor: '#2d2d2d',
-                  padding: '0.3rem 0.6rem',
-                  borderRadius: '4px',
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                  border: '1px solid #404040'
-                }}
-                onClick={() => {
-                  // Check if variable already exists
-                  const exists = variablesData.some(v => v.key === varName);
-                  if (!exists) {
-                    setVariablesData([...variablesData, {
-                      key: varName,
-                      value: '',
-                      enabled: true,
-                      isSecret: false
-                    }]);
-                  }
-                }}
-                title={`Click to add ${varName}`}
-              >
-                {varName}
-              </code>
-            ))}
-          </div>
         </div>
       </div>
 

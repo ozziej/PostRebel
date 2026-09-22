@@ -319,7 +319,7 @@ if (response.access_token) {
 | Method | Available in | Description |
 |---|---|---|
 | `pm.environment.get(key)` / `.set(key, value)` | pre-request, test | Read/write the active environment's variables |
-| `pm.collectionVariables.get(key)` / `.set(key, value)` | pre-request, test | Read/write a variable scoped to the request's collection (in-memory only — no editor UI yet) |
+| `pm.collectionVariables.get(key)` / `.set(key, value)` | pre-request, test | Read/write a variable scoped to the request's collection — persisted to disk via the collection's **Edit Variables** editor, same as environment variables |
 | `pm.globals.get(key)` / `.set(key, value)` | pre-request, test | Read/write a variable shared across every script execution for the current app session (in-memory only, cleared on restart) |
 | `pm.sendRequest(url \| requestObject, (err, res) => {})` | pre-request, test | Fire an additional HTTP request from a script (e.g. to fetch a fresh token before the real request runs) — the script waits for the callback before finishing. `requestObject` accepts `{ url, method, header: [{key, value}] \| {...}, body: { mode: 'raw', raw: '...' } }`; the callback's `res` has `.status`, `.json()`, `.text()`, `.headers`, `.time` |
 | `pm.response.*` | test | `.status`, `.code`, `.statusText`, `.headers`, `.json()`, `.text()`, `.time`, `.responseSize` |
@@ -449,7 +449,7 @@ Runner definitions are committed to git (`{workspace}/runners/`); run history is
 The **⬆️ Import** button in the top menu bar opens the import dialog, which has four tabs:
 
 #### Postman Collection
-Import a Postman v2.0 or v2.1 collection JSON file. All requests, headers, body content, authentication, and pre/post scripts are preserved.
+Import a Postman v2.0 or v2.1 collection JSON file. All requests, headers, body content, authentication, and pre/post scripts are preserved. A top-level `variable[]` array is imported into the collection's own **Edit Variables** editor (for `pm.collectionVariables`) and into a synthetic `"<name> Variables"` Environment (for `{{variable}}` substitution in URLs/headers/bodies).
 
 #### Postman Environment
 Import a Postman environment JSON file. Variables and secret flags are preserved.
@@ -473,7 +473,7 @@ You can import into an existing collection (folders will be merged in) or create
 
 Right-click (or click **···** on) any collection in the sidebar to export it:
 
-- **Export (Postman)** - Downloads a Postman v2.1 collection JSON file (`<name>.postman_collection.json`). Requests, folders, headers, bodies, Bearer/Basic auth, and pre-request/test scripts are converted to Postman's native shapes. `jwt`-type auth is exported as Bearer (Postman has no native JWT auth type); `inherit`-type auth is omitted so the item inherits from its parent, matching Postman's own convention.
+- **Export (Postman)** - Downloads a Postman v2.1 collection JSON file (`<name>.postman_collection.json`). Requests, folders, headers, bodies, Bearer/Basic auth, and pre-request/test scripts are converted to Postman's native shapes. `jwt`-type auth is exported as Bearer (Postman has no native JWT auth type); `inherit`-type auth is omitted so the item inherits from its parent, matching Postman's own convention. Collection variables (`pm.collectionVariables`) are written to a top-level `variable[]` array, matching Postman's own schema — Postman's collection-variable schema has no secret type, so these export with `type: "string"` regardless of the `isSecret` flag on PostRebel's side.
 - **Export (OpenAPI)** - Downloads an OpenAPI 3.0 spec JSON file (`<name>.openapi.json`). `{{variable}}` placeholders in the URL path become `{variable}` path parameters, template-valued query/header params become OpenAPI query/header parameters, folders become tags, and Bearer/Basic auth become `securitySchemes`. The most common request host across the collection becomes the spec's `servers` entry.
 
 Both exports round-trip through PostRebel's own importers, but some information is necessarily lossy going the other way — e.g. Postman's arbitrarily nested sub-folders are flattened to one level on import, so a collection with deep nesting won't regain it after an export/import cycle.
@@ -633,7 +633,8 @@ npm run dist         # Create distributable packages
 - ✅ **Collection export (Postman v2, OpenAPI)** - Export any collection from its **···** menu in the sidebar as a Postman v2.1 collection JSON or an OpenAPI 3.0 spec; auth, headers, bodies, folders (as tags), and `{{variable}}` placeholders (as path/query params) are converted back to each format's native shape
 - ✅ **Import/export workspaces** - Export (⬇️) any workspace from the **Workspace Manager** as a single `.postrebel_workspace.json` bundle containing its collections, environments (with secret values), runners, runner history, request history, and saved responses; **Import** the file back in to recreate the whole workspace, ready to switch to immediately
 - ✅ **Local secret scanner** - Header, environment variable, and form-data param values are checked against known secret formats (AWS keys, GitHub/Slack/Stripe tokens, PEM blocks, JWTs, hardcoded Bearer tokens) and suspicious key names (`*token*`, `*secret*`, `*api_key*`, `*password*`, ...); a ⚠️ warning icon appears next to any match that isn't marked `isSecret` (headers have no secret-marking mechanism at all, so any match there is always flagged)
-- ✅ **Expanded `pm` script API** - `pm.sendRequest(urlOrRequestObject, callback)` fires an HTTP request from a pre-request/test script (e.g. to fetch a fresh token) and waits for the callback before the script is considered finished; `pm.collectionVariables.get/set` reads and writes a `Collection`-scoped variable bag; `pm.globals.get/set` reads and writes an in-memory, app-session-scoped variable bag shared by every script execution. Collection variables and globals are script-only for now — there's no dedicated editor UI yet, and Postman-collection-level `variable[]` still imports into a separate Environment rather than into `Collection.variables`.
+- ✅ **Expanded `pm` script API** - `pm.sendRequest(urlOrRequestObject, callback)` fires an HTTP request from a pre-request/test script (e.g. to fetch a fresh token) and waits for the callback before the script is considered finished; `pm.collectionVariables.get/set` reads and writes a `Collection`-scoped variable bag; `pm.globals.get/set` reads and writes an in-memory, app-session-scoped variable bag shared by every script execution. `pm.globals` remains in-memory only (cleared on restart).
+- ✅ **Collection Variables editor** - Collection-scoped variables (the ones `pm.collectionVariables` reads/writes) now have their own editor — **Edit Variables** in a collection's **···** menu — with the same secret-marking, sort, and bulk-edit support as the Environment editor. Importing a Postman v2 collection with a top-level `variable[]` array now populates these directly (in addition to the existing synthetic `"<name> Variables"` Environment, kept for `{{variable}}` substitution compatibility), and exporting a collection writes them back out as Postman's own `variable[]` array.
 
 🚧 **Planned:**
 - Workspace templates

@@ -69,6 +69,7 @@ interface SidebarProps {
   onDeleteCollection: (collectionId: string) => Promise<any>;
   onDeleteRequest: (collectionId: string, requestId: string) => Promise<any>;
   onEditCollectionAuth: (collection: Collection) => void;
+  onEditCollectionVariables: (collection: Collection) => void;
   onSelectRunner: (runner: Runner) => void;
   onDeleteRunner: (runnerId: string) => void;
   onRenameRunner: (runnerId: string, newName: string) => void;
@@ -106,6 +107,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteCollection,
   onDeleteRequest,
   onEditCollectionAuth,
+  onEditCollectionVariables,
   onSelectRunner,
   onDeleteRunner,
   onRenameRunner,
@@ -132,8 +134,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const dividerHeight = 5; // Height of MenuDivider
 
     if (menuId.startsWith('col-')) {
-      // Collection menu: Add Folder, Rename, Edit Authentication, Divider, Export (Postman), Export (OpenAPI), Divider, Delete
-      return menuItemHeight * 6 + dividerHeight * 2;
+      // Collection menu: Add Folder, Rename, Edit Authentication, Edit Variables, Divider, Export (Postman), Export (OpenAPI), Divider, Delete
+      return menuItemHeight * 7 + dividerHeight * 2;
     } else if (menuId.startsWith('req-') || menuId.startsWith('runner-')) {
       // Request/Runner menu: Rename, Duplicate, Divider, Delete
       return menuItemHeight * 3 + dividerHeight;
@@ -841,17 +843,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       {openMenuId === `col-${collection.id}` && menuPos && (
                         <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
                           <MenuItem icon="📁" label="Add Folder" onClick={() => {
+                            setOpenMenuId(null);
                             setNewFolderCollectionId(collection.id);
                             setNewFolderName('');
                             setExpandedCollections(prev => new Set([...prev, collection.id]));
                           }} />
-                          <MenuItem icon="✏️" label="Rename" onClick={() => startEditingCollection(collection)} />
-                          <MenuItem icon="🔐" label="Edit Authentication" onClick={() => onEditCollectionAuth(collection)} />
+                          <MenuItem icon="✏️" label="Rename" onClick={() => { setOpenMenuId(null); startEditingCollection(collection); }} />
+                          <MenuItem icon="🔐" label="Edit Authentication" onClick={() => { setOpenMenuId(null); onEditCollectionAuth(collection); }} />
+                          <MenuItem icon="🧩" label="Edit Variables" onClick={() => { setOpenMenuId(null); onEditCollectionVariables(collection); }} />
                           <MenuDivider />
                           <MenuItem icon="⬇️" label="Export (Postman)" onClick={() => { setOpenMenuId(null); exportCollectionAsPostman(collection); }} />
                           <MenuItem icon="⬇️" label="Export (OpenAPI)" onClick={() => { setOpenMenuId(null); exportCollectionAsOpenApi(collection); }} />
                           <MenuDivider />
-                          <MenuItem icon="🗑️" label="Delete" onClick={() => deleteCollection(collection.id, collection.name)} destructive />
+                          <MenuItem icon="🗑️" label="Delete" onClick={() => { setOpenMenuId(null); deleteCollection(collection.id, collection.name); }} destructive />
                         </div>
                       )}
                     </div>
@@ -1016,11 +1020,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         <button onClick={(e) => openMenu(e, `req-${request.id}`)} className="button-secondary button" style={{ fontSize: '0.8rem', padding: '0.15rem 0.4rem', letterSpacing: '0.05em' }} title="More actions">···</button>
                                         {openMenuId === `req-${request.id}` && menuPos && (
                                           <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
-                                            <MenuItem icon="✏️" label="Rename" onClick={() => startEditingRequest(request)} />
-                                            <MenuItem icon="⿻" label="Duplicate" onClick={() => duplicateRequest(collection, request, folder.id)} />
+                                            <MenuItem icon="✏️" label="Rename" onClick={() => { setOpenMenuId(null); startEditingRequest(request); }} />
+                                            <MenuItem icon="⿻" label="Duplicate" onClick={() => { setOpenMenuId(null); duplicateRequest(collection, request, folder.id); }} />
                                             <MenuItem icon="→" label="Copy to Workspace" onClick={() => { setOpenMenuId(null); onCopyToWorkspace(request); }} />
                                             <MenuDivider />
-                                            <MenuItem icon="🗑️" label="Delete" onClick={() => deleteRequest(collection, request.id, request.name)} destructive />
+                                            <MenuItem icon="🗑️" label="Delete" onClick={() => { setOpenMenuId(null); deleteRequest(collection, request.id, request.name); }} destructive />
                                           </div>
                                         )}
                                       </div>
@@ -1138,11 +1142,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               <button onClick={(e) => openMenu(e, `req-${request.id}`)} className="button-secondary button" style={{ fontSize: '0.8rem', padding: '0.15rem 0.4rem', letterSpacing: '0.05em' }} title="More actions">···</button>
                               {openMenuId === `req-${request.id}` && menuPos && (
                                 <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
-                                  <MenuItem icon="✏️" label="Rename" onClick={() => startEditingRequest(request)} />
-                                  <MenuItem icon="⿻" label="Duplicate" onClick={() => duplicateRequest(collection, request)} />
+                                  <MenuItem icon="✏️" label="Rename" onClick={() => { setOpenMenuId(null); startEditingRequest(request); }} />
+                                  <MenuItem icon="⿻" label="Duplicate" onClick={() => { setOpenMenuId(null); duplicateRequest(collection, request); }} />
                                   <MenuItem icon="→" label="Copy to Workspace" onClick={() => { setOpenMenuId(null); onCopyToWorkspace(request); }} />
                                   <MenuDivider />
-                                  <MenuItem icon="🗑️" label="Delete" onClick={() => deleteRequest(collection, request.id, request.name)} destructive />
+                                  <MenuItem icon="🗑️" label="Delete" onClick={() => { setOpenMenuId(null); deleteRequest(collection, request.id, request.name); }} destructive />
                                 </div>
                               )}
                             </div>
@@ -1291,12 +1295,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       {openMenuId === `runner-${runner.id}` && menuPos && (
                         <div style={{ ...menuBase, position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}>
                           <MenuItem icon="✏️" label="Rename" onClick={() => {
+                            setOpenMenuId(null);
                             setEditingRunner(runner.id);
                             setEditName(runner.name);
                           }} />
-                          <MenuItem icon="⿻" label="Duplicate" onClick={() => onDuplicateRunner(runner)} />
+                          <MenuItem icon="⿻" label="Duplicate" onClick={() => { setOpenMenuId(null); onDuplicateRunner(runner); }} />
                           <MenuDivider />
-                          <MenuItem icon="🗑️" label="Delete" onClick={() => onDeleteRunner(runner.id)} destructive />
+                          <MenuItem icon="🗑️" label="Delete" onClick={() => { setOpenMenuId(null); onDeleteRunner(runner.id); }} destructive />
                         </div>
                       )}
                     </div>

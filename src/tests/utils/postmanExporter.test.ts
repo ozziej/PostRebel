@@ -117,6 +117,47 @@ describe('exportPostmanCollection', () => {
     expect(request.body).toEqual({ type: 'raw', rawSubtype: 'json', data: '{"a":1}' });
     expect(request.auth).toEqual({ type: 'bearer', bearer: 'abc123' });
   });
+
+  it('exports collection.variablesArray as a top-level Postman variable[] array', () => {
+    const collection: Collection = {
+      id: '1',
+      name: 'With Variables',
+      requests: [],
+      variablesArray: [
+        { key: 'apiBase', value: 'https://api.example.com', isSecret: false },
+        { key: 'authToken', value: 'super-secret', isSecret: true },
+      ],
+    };
+
+    const exported = exportPostmanCollection(collection);
+
+    expect(exported.variable).toEqual([
+      { key: 'apiBase', value: 'https://api.example.com', type: 'string' },
+      { key: 'authToken', value: 'super-secret', type: 'string' },
+    ]);
+  });
+
+  it('omits the variable array entirely when there are no collection variables', () => {
+    const collection: Collection = { id: '1', name: 'No Variables', requests: [] };
+    expect(exportPostmanCollection(collection).variable).toBeUndefined();
+  });
+
+  it('round-trips collection variables through importPostmanCollection into collection.variablesArray', () => {
+    const collection: Collection = {
+      id: '1',
+      name: 'Round Trip Vars',
+      requests: [],
+      variablesArray: [{ key: 'apiBase', value: 'https://api.example.com', isSecret: false }],
+    };
+
+    const exported = exportPostmanCollection(collection);
+    const reimported = importPostmanCollection(JSON.stringify(exported));
+
+    expect(reimported.collection.variablesArray).toEqual([
+      { key: 'apiBase', value: 'https://api.example.com', isSecret: false },
+    ]);
+    expect(reimported.collection.variables).toEqual({ apiBase: 'https://api.example.com' });
+  });
 });
 
 describe('exportPostmanEnvironment', () => {
