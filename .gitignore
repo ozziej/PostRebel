@@ -17,3 +17,4 @@ workspaces/**/secrets/
 public/test-harness.html
 scripts/smoke-test-cli.mjs
 scripts/verify-mcp.mjs
+scripts/try-mcp.mjs
