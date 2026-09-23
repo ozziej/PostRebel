@@ -5,6 +5,7 @@ import { executeRunner, executeRunnerForDataRows } from '../src/utils/runnerExec
 import { parseDataRows, detectDataFileFormat } from '../src/utils/dataFile';
 import { Runner, RunnerNodeResult, RunnerLogEntry, Environment } from '../src/types';
 import { executeHttpConfig } from './httpTransport';
+import { runMcpServer } from './mcpServer';
 import {
   getDefaultUserDataDir, resolveWorkspacesDir,
   loadCollections, loadEnvironments, loadRunners, loadCertificates,
@@ -250,5 +251,13 @@ export async function runCli(
 }
 
 if (require.main === module) {
-  runCli(process.argv.slice(2)).then(code => process.exit(code));
+  const [sub] = process.argv.slice(2);
+  if (sub === 'mcp') {
+    runMcpServer(process.argv.slice(3)).catch((err) => {
+      console.error('[postrebel mcp] fatal error:', err);
+      process.exit(1);
+    });
+  } else {
+    runCli(process.argv.slice(2)).then(code => process.exit(code));
+  }
 }

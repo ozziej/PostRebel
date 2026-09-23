@@ -501,6 +501,39 @@ postrebel run "Test API" --workspace New-Test --env AWS-INT --reporter junit --o
 postrebel run "Test API" --workspace New-Test --env AWS-INT --data users.csv --reporter junit --out results.xml
 ```
 
+### MCP Server
+
+`postrebel mcp` exposes your workspaces/collections/requests/runners to an AI agent (Claude Code, Claude Desktop, or any MCP client) over the [Model Context Protocol](https://modelcontextprotocol.io) — the agent can list what you have and run a saved request or runner directly, without you switching to the app or a terminal. It's a stdio server (the client spawns and owns it for the session; nothing listens on a network port) built on the same headless engine as the CLI above — `run_request`/`run_runner` are real, live network calls, not a simulation.
+
+Add it to your MCP client's config (e.g. `.mcp.json`), after `npm run build` and `npm link` (see [Headless CLI Runner](#headless-cli-runner) above):
+
+```json
+{
+  "mcpServers": {
+    "postrebel": {
+      "command": "postrebel",
+      "args": ["mcp"],
+      "env": { "POSTREBEL_WORKSPACES_DIR": "/Users/you/PostRebelWorkspaces" }
+    }
+  }
+}
+```
+
+`POSTREBEL_WORKSPACES_DIR` is optional — omit it to use the same `settings.json`/`~/PostRebelWorkspaces` resolution the GUI and CLI already use. Without `npm link`, point `command` at `node` with `args: ["/absolute/path/to/PostRebel/dist/electron/mcpServer.js"]` instead.
+
+| Tool | What it does |
+|------|--------------|
+| `list_workspaces` | List every workspace on this machine. |
+| `list_collections` | List the collections in a workspace, with request/folder counts. |
+| `list_requests` | List every request in a collection (including nested folders). |
+| `get_request` | Get one request's full definition — headers, body, auth (credential values redacted). |
+| `list_environments` | List a workspace's environments and variables (secret values omitted). |
+| `list_runners` | List the saved Collection Runner flows in a workspace. |
+| `run_request` | **Makes a real HTTP call** using a saved request's method/URL/headers/auth (including OAuth2 token fetching) and returns the response. |
+| `run_runner` | **Makes real HTTP calls** by executing a saved Runner flow and returns every node's result. |
+
+This is read-and-run only by design, matching the tools above — there's no create/edit/delete surface, and only saved, named requests can be run (an agent can't ask it to fetch an arbitrary URL). Your MCP client's own approval prompt is the safety gate before `run_request`/`run_runner` actually fire — PostRebel doesn't add a second one. One pre-existing limitation carries over from the CLI: a saved request's pre-request/test script calling `pm.sendRequest(...)` won't work headlessly (it depends on the Electron-only HTTP bridge), whether run via the CLI or via this MCP server.
+
 ### Importing
 
 The **⬆️ Import** button in the top menu bar opens the import dialog, which has four tabs:
@@ -737,6 +770,7 @@ npm run dist         # Create distributable packages
 - ✅ **GraphQL request support** - A **GraphQL** body type with a Query editor and a separate Variables (JSON) editor, sent as `POST {query, variables}`; schema introspection fires automatically on URL entry, showing a Queries/Mutations field list. Round-trips through Postman import/export. See [GraphQL Requests](#graphql-requests) above. No autocomplete-in-editor yet — see the note there.
 - ✅ **OpenAPI drift check** - Re-importing a spec into an existing collection now diffs against it by method+path instead of blindly duplicating everything — shows added/changed/removed endpoints (with `field: before → after` detail for changes) before you commit, preserves request IDs across updates so runners/history/saved-responses stay valid, and never deletes a removed endpoint unless you explicitly tick it. See [Drift check](#drift-check-re-importing-into-an-existing-collection) above.
 - ✅ **OAuth2 auth type** - Client Credentials, Password Credentials, Authorization Code (code obtained elsewhere), and Refresh Token grants, at both the request and collection level. Tokens are fetched and cached automatically (in-memory only, shared across requests/runner nodes using the same client+token URL until near expiry), with a **Get Access Token** test button, generated-code support (cURL/fetch/Python fetch the token first, then use it), and Postman/OpenAPI import-export round-tripping. Works identically in the headless CLI runner. See [OAuth 2.0 Authentication](#oauth-20-authentication) above. The interactive Authorization Code + PKCE browser-redirect flow (loopback server + system browser) is intentionally not implemented — it has no headless-CLI equivalent, so it's out of scope for now.
+- ✅ **MCP server integration** - `postrebel mcp` exposes workspaces/collections/requests/runners to an AI agent (Claude Code, Claude Desktop, any MCP client) over a stdio server — reusing the same headless engine as the CLI runner, so `run_request`/`run_runner` make real, live network calls. Read-and-run only (list workspaces/collections/requests/environments/runners, plus run one saved request or runner); no create/edit/delete surface, and only saved, named requests can be run. Not shipped by either Bruno or Postman yet. See [MCP Server](#mcp-server) above.
 
 🚧 **Planned:**
 - Workspace templates
@@ -744,12 +778,7 @@ npm run dist         # Create distributable packages
 - Plugin system
 - Parameterised dynamic variables e.g. `{{randomInt(1,100)}}`
 
-**Design principle: stay local-first.** PostRebel will not grow a cloud account, hosted sync, or team-server component — that's the single biggest recurring complaint about Postman (forced login just to save a collection, "always online" requirements, tightening free-tier pricing). Everything below should work fully offline, with git as the only sharing mechanism.
-
-**From a Bruno/Postman feature comparison, in priority order:**
-1. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
-
-Explicitly out of scope as a result of the local-first principle: mock servers, monitors/scheduled runs, team SSO/SCIM, or any other feature that requires a hosted service.
+**Design principle: stay local-first.** PostRebel will not grow a cloud account, hosted sync, or team-server component — that's the single biggest recurring complaint about Postman (forced login just to save a collection, "always online" requirements, tightening free-tier pricing). Everything above should work fully offline, with git as the only sharing mechanism. Explicitly out of scope as a result: mock servers, monitors/scheduled runs, team SSO/SCIM, or any other feature that requires a hosted service.
 
 ## Contributing
 

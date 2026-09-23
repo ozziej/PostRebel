@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import { Collection, Environment, Certificate, Runner } from '../src/types';
+import { Collection, Environment, Certificate, Runner, Workspace } from '../src/types';
 import { flattenRequests } from '../src/utils/collectionTree';
 
 // Read-only mirror of the workspace file layout electron/main.ts's IPC handlers
@@ -29,6 +29,36 @@ export async function resolveWorkspacesDir(userDataDir: string, override?: strin
   const settings = await loadSettings(userDataDir);
   if (settings.workspacesDirectory) return settings.workspacesDirectory;
   return path.join(os.homedir(), 'PostRebelWorkspaces');
+}
+
+// Mirrors main.ts's 'load-workspaces' IPC handler — enumerates every workspace
+// folder under `workspacesDir`, unlike the CLI (which is always told a single
+// workspace name via --workspace) this is needed by the MCP server's
+// list_workspaces tool, which has no equivalent single-workspace flag.
+export async function listWorkspaces(workspacesDir: string): Promise<Workspace[]> {
+  let entryNames: string[];
+  try {
+    entryNames = (await fs.readdir(workspacesDir, { withFileTypes: true }))
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name);
+  } catch {
+    return [];
+  }
+
+  const workspaces: Workspace[] = [];
+  for (const name of entryNames) {
+    try {
+      const content = await fs.readFile(path.join(workspacesDir, name, 'workspace.json'), 'utf-8');
+      const workspace = JSON.parse(content);
+      // IMPORTANT: use the folder name as the true id, not what's in the file — fixes manually renamed folders.
+      workspace.id = name;
+      workspace.path = path.join(workspacesDir, name);
+      workspaces.push(workspace);
+    } catch {
+      // Skip directories without a valid workspace.json
+    }
+  }
+  return workspaces;
 }
 
 async function readJsonFilesInDir(dir: string, filter: (file: string) => boolean): Promise<Array<{ file: string; data: any }>> {
