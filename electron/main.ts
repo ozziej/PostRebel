@@ -2,10 +2,9 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { simpleGit } from 'simple-git';
-import axios, { AxiosRequestConfig } from 'axios';
-import * as https from 'https';
 import * as os from 'os';
 import { splitSecrets } from '../src/utils/secretSplitter';
+import { executeHttpConfig } from './httpTransport';
 
 let mainWindow: BrowserWindow;
 
@@ -1317,118 +1316,19 @@ ipcMain.handle('save-runner-history', async (event, workspaceId: string, entry: 
 
 // HTTP Request handler - runs in Node.js, no CORS restrictions!
 ipcMain.handle('execute-http-request', async (event, requestConfig) => {
-  const startTime = Date.now();
+  console.log('[Main Process] Executing HTTP request:', {
+    method: requestConfig.method,
+    url: requestConfig.url,
+    hasAuth: !!requestConfig.headers?.Authorization
+  });
 
-  try {
-    console.log('[Main Process] Executing HTTP request:', {
-      method: requestConfig.method,
-      url: requestConfig.url,
-      hasAuth: !!requestConfig.headers?.Authorization
-    });
+  const result = await executeHttpConfig(requestConfig);
 
-    // Create https agent with certificate handling
-    const httpsAgent = new https.Agent({
-      rejectUnauthorized: requestConfig.rejectUnauthorized !== false,
-      // Add certificate support if needed
-      ca: requestConfig.ca,
-      cert: requestConfig.cert,
-      key: requestConfig.key
-    });
-
-    // Handle binary data: decode base64 into Buffer
-    let requestData = requestConfig.data;
-    if (requestConfig.binaryData) {
-      requestData = Buffer.from(requestConfig.binaryData, 'base64');
-    }
-
-    const config: AxiosRequestConfig = {
-      method: requestConfig.method,
-      url: requestConfig.url,
-      headers: requestConfig.headers || {},
-      data: requestData,
-      timeout: requestConfig.timeout || 30000,
-      httpsAgent,
-      // Important: This allows axios to work in Node.js without CORS
-      maxRedirects: 5,
-      validateStatus: () => true, // Accept all status codes
-      responseType: 'arraybuffer'  // Always receive raw bytes; we decode below
-    };
-
-    const response = await axios(config);
-    const endTime = Date.now();
-
-    const contentTypeRaw = response.headers['content-type'];
-    const contentType: string = (Array.isArray(contentTypeRaw) ? contentTypeRaw[0] : (contentTypeRaw || '')).toString().toLowerCase();
-    const rawBuffer: Buffer = Buffer.from(response.data);
-    const byteSize = rawBuffer.length;
-
-    // Decode response data appropriately for IPC (which cannot carry raw Buffers)
-    let responseData: any;
-    if (contentType.includes('image/') || contentType.includes('application/octet-stream')) {
-      // Binary: send as base64 string so the renderer can build a data URL
-      responseData = rawBuffer.toString('base64');
-    } else {
-      // Text / JSON: decode as UTF-8 string then attempt JSON parse
-      const text = rawBuffer.toString('utf8');
-      if (contentType.includes('application/json') || contentType.includes('+json')) {
-        try { responseData = JSON.parse(text); } catch { responseData = text; }
-      } else {
-        responseData = text;
-      }
-    }
-
-    console.log('[Main Process] Request completed:', {
-      status: response.status,
-      statusText: response.statusText,
-      contentType,
-      byteSize,
-      time: endTime - startTime
-    });
-
-    return {
-      success: true,
-      response: {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-        data: responseData,
-        time: endTime - startTime,
-        size: byteSize
-      }
-    };
-
-  } catch (error: any) {
-    const endTime = Date.now();
-
-    console.error('[Main Process] Request failed:', {
-      code: error.code,
-      message: error.message,
-      hasResponse: !!error.response
-    });
-
-    if (error.response) {
-      // Server responded with error status
-      return {
-        success: true,
-        response: {
-          status: error.response.status,
-          statusText: error.response.statusText,
-          headers: error.response.headers,
-          data: error.response.data,
-          time: endTime - startTime,
-          size: JSON.stringify(error.response.data || '').length
-        }
-      };
-    } else {
-      // Network error
-      return {
-        success: false,
-        error: {
-          code: error.code,
-          message: error.message,
-          time: endTime - startTime
-        }
-      };
-    }
+  if (result.success) {
+    console.log('[Main Process] Request completed:', result.response);
+  } else {
+    console.error('[Main Process] Request failed:', result.error);
   }
+
+  return result;
 });

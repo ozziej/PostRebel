@@ -4,6 +4,9 @@
   "description": "Local API testing tool with git support",
   "author": "James Ostrowick <james@ostrowick.co.za>",
   "main": "dist/electron/main.js",
+  "bin": {
+    "postrebel": "dist/electron/cli.js"
+  },
   "scripts": {
     "dev": "concurrently \"npm run dev:electron\" \"npm run dev:react\"",
     "dev:react": "webpack serve --mode development",

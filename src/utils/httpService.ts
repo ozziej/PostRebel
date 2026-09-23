@@ -7,6 +7,12 @@ export interface ResolvedRequestInfo {
   headers: Record<string, string>;
 }
 
+// Executes the low-level request config built below and returns a normalized result.
+// Defaults to the Electron IPC bridge; the headless CLI runner injects a direct
+// Node/axios transport instead so the same request-building/error-handling logic
+// (auth, variable substitution, cert/network error messages) works outside Electron.
+export type HttpTransport = (config: any) => Promise<{ success: boolean; response?: ApiResponse; error?: { code?: string; message: string } }>;
+
 export class HttpService {
   static replaceVariables(text: string, environment: Environment): string {
     return text.replace(/\{\{([\w.$]+)\}\}/g, (match, varName) => {
@@ -33,7 +39,8 @@ export class HttpService {
     environment: Environment,
     certificates: Certificate[] = [],
     collection: Collection | null = null,
-    onResolved?: (resolved: ResolvedRequestInfo) => void
+    onResolved?: (resolved: ResolvedRequestInfo) => void,
+    transport: HttpTransport = (config) => window.electronAPI.executeHttpRequest(config),
   ): Promise<ApiResponse> {
     const startTime = Date.now();
 
@@ -41,7 +48,7 @@ export class HttpService {
       // Replace variables in URL
       const url = this.replaceVariables(request.url, environment);
 
-      console.log('[HTTP Service] Making request via main process (no CORS!):', url);
+      console.error('[HTTP Service] Making request via main process (no CORS!):', url);
 
       // Replace variables in headers
       const headers: Record<string, string> = {};
@@ -53,7 +60,7 @@ export class HttpService {
       let effectiveAuth = request.auth;
       if (request.auth?.type === 'inherit' && collection?.auth) {
         effectiveAuth = collection.auth;
-        console.log('[HTTP Service] Using inherited auth from collection:', effectiveAuth.type);
+        console.error('[HTTP Service] Using inherited auth from collection:', effectiveAuth.type);
       }
 
       // Add authentication
@@ -95,20 +102,20 @@ export class HttpService {
         );
 
         if (relevantCerts.length > 0) {
-          console.log(`[HTTP Service] Found ${relevantCerts.length} certificate(s) for ${urlHost}:`,
+          console.error(`[HTTP Service] Found ${relevantCerts.length} certificate(s) for ${urlHost}:`,
             relevantCerts.map(c => ({ name: c.name, host: c.host, type: c.type }))
           );
 
           // Disable certificate verification for this request in main process
           config.rejectUnauthorized = false;
 
-          console.log(`[HTTP Service] Certificate verification disabled for ${urlHost}`);
+          console.error(`[HTTP Service] Certificate verification disabled for ${urlHost}`);
         } else {
-          console.log(`[HTTP Service] No matching certificates found for ${urlHost}`);
-          console.log(`[HTTP Service] Available certificate hosts:`, certificates.map(c => c.host));
+          console.error(`[HTTP Service] No matching certificates found for ${urlHost}`);
+          console.error(`[HTTP Service] Available certificate hosts:`, certificates.map(c => c.host));
         }
       } else {
-        console.log('[HTTP Service] No certificates configured');
+        console.error('[HTTP Service] No certificates configured');
       }
 
       // Handle request body
@@ -147,15 +154,15 @@ export class HttpService {
                 .forEach(item => {
                   const value = this.replaceVariables(item.value, environment);
                   params.append(item.key, value);
-                  console.log(`[HTTP Service] Form param: ${item.key} = ${value}`);
+                  console.error(`[HTTP Service] Form param: ${item.key} = ${value}`);
                 });
               // Convert to string for transmission to main process
               config.data = params.toString();
-              console.log('[HTTP Service] x-www-form-urlencoded body:', config.data);
+              console.error('[HTTP Service] x-www-form-urlencoded body:', config.data);
             } else if (typeof request.body.data === 'string' && request.body.data) {
               // Legacy support for string data
               config.data = new URLSearchParams(request.body.data).toString();
-              console.log('[HTTP Service] x-www-form-urlencoded body (legacy):', config.data);
+              console.error('[HTTP Service] x-www-form-urlencoded body (legacy):', config.data);
             }
             headers['Content-Type'] = 'application/x-www-form-urlencoded';
             break;
@@ -180,20 +187,20 @@ export class HttpService {
       }
 
       // Execute request via main process (Node.js) - NO CORS!
-      console.log('[HTTP Service] ========== REQUEST DEBUG ==========');
-      console.log('[HTTP Service] Method:', config.method.toUpperCase());
-      console.log('[HTTP Service] URL:', config.url);
-      console.log('[HTTP Service] Headers:', config.headers);
-      console.log('[HTTP Service] Body:', config.data);
-      console.log('[HTTP Service] Body type:', typeof config.data);
-      console.log('[HTTP Service] =====================================');
+      console.error('[HTTP Service] ========== REQUEST DEBUG ==========');
+      console.error('[HTTP Service] Method:', config.method.toUpperCase());
+      console.error('[HTTP Service] URL:', config.url);
+      console.error('[HTTP Service] Headers:', config.headers);
+      console.error('[HTTP Service] Body:', config.data);
+      console.error('[HTTP Service] Body type:', typeof config.data);
+      console.error('[HTTP Service] =====================================');
 
       onResolved?.({ method: config.method.toUpperCase(), url: config.url, headers: config.headers });
 
-      const result = await window.electronAPI.executeHttpRequest(config);
+      const result = await transport(config);
 
       if (result.success && result.response) {
-        console.log('[HTTP Service] Request successful:', result.response.status);
+        console.error('[HTTP Service] Request successful:', result.response.status);
         return result.response;
       } else if (result.error) {
         // Handle network error from main process

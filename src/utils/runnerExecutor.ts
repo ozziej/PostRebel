@@ -2,7 +2,7 @@ import {
   Runner, RunnerEdge, RunnerNodeResult, RunnerLogEntry,
   Collection, Environment, Certificate, ApiRequest, ApiResponse,
 } from '../types';
-import { HttpService } from './httpService';
+import { HttpService, HttpTransport } from './httpService';
 import { resolveDynamicVariable } from './dynamicVariables';
 import { ScriptRunner } from './scriptRunner';
 import { findRequestById } from './collectionTree';
@@ -271,6 +271,7 @@ interface SeqCtx {
   onLog?: (entry: RunnerLogEntry) => void;
   signal?: AbortSignal;
   secretVarNames: Set<string>;
+  transport?: HttpTransport;
 }
 
 // ── Core sequence runner (called recursively for forEach bodies) ──────────────
@@ -402,7 +403,7 @@ async function runSequence(
           ? { ...ctx.environment, variables: vars }
           : { id: 'runner-env', name: 'Runner', variables: vars };
 
-        response = await HttpService.executeRequest(request, mergedEnv, ctx.certificates, ctx.collection);
+        response = await HttpService.executeRequest(request, mergedEnv, ctx.certificates, ctx.collection, undefined, ctx.transport);
         resp = response;
 
         // ── Test script ─────────────────────────────────────────────────────
@@ -536,7 +537,7 @@ async function runSequence(
             ? { ...ctx.environment, variables: vars }
             : { id: 'runner-env', name: 'Runner', variables: vars };
 
-          const response = await HttpService.executeRequest(request, mergedEnv, ctx.certificates, ctx.collection);
+          const response = await HttpService.executeRequest(request, mergedEnv, ctx.certificates, ctx.collection, undefined, ctx.transport);
           lastResponse = response;
           resp = response;
 
@@ -637,6 +638,7 @@ export async function executeRunner(
   onEdgeFollowed?: (edgeId: string) => void,
   onLog?: (entry: RunnerLogEntry) => void,
   signal?: AbortSignal,
+  transport?: HttpTransport,
 ): Promise<void> {
   // Build outgoing edge map; conditional edges sorted first (unconditional = else fallback)
   const outgoingEdges: Record<string, RunnerEdge[]> = {};
@@ -680,7 +682,7 @@ export async function executeRunner(
   const ctx: SeqCtx = {
     runner, collection, environment, certificates,
     outgoingEdges, onNodeStatusChange, onEdgeFollowed, onLog, signal,
-    secretVarNames,
+    secretVarNames, transport,
   };
 
   await runSequence(startEdge.target, localVars, null, ctx);

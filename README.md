@@ -444,6 +444,47 @@ Every completed run is saved automatically. Click the **History** toolbar button
 
 Runner definitions are committed to git (`{workspace}/runners/`); run history is stored locally only (`{workspace}/runner-history/`). See [Collection Runner guide](docs/collection-runner.md) for full documentation.
 
+### Headless CLI Runner
+
+Run a saved Collection Runner flow from a terminal or CI job — no Electron process, no GUI. It's the exact same execution engine as the desktop app (`src/utils/runnerExecutor.ts`), so a flow behaves identically whether you click **Run** in the app or run it from a pipeline.
+
+```bash
+npm run build                    # once, to produce dist/electron/cli.js
+node dist/electron/cli.js run <collection> --workspace <name> [options]
+```
+
+To get a plain `postrebel` command instead of `node dist/electron/cli.js`, run this once from the project folder:
+
+```bash
+npm link
+```
+
+Then from anywhere on your machine:
+
+```bash
+postrebel run <collection> --workspace <name> [options]
+```
+
+`npm run build` still needs to be re-run after pulling code changes — the CLI runs the compiled `dist/` output, not the TypeScript source, and `npm link` just points a global `postrebel` command at that same `dist/electron/cli.js`.
+
+You must create the Runner flow itself in the GUI first — the CLI executes an existing saved flow, it doesn't build one. If the collection has exactly one runner, `--runner` can be omitted.
+
+| Option | Description |
+|--------|-------------|
+| `--workspace <name>` | Required. The workspace folder name (as shown in the Workspace Manager). |
+| `--env <name>` | Environment to run against. Omit to run with no environment variables. |
+| `--runner <name>` | Which runner to execute, by name. Required only if the collection has more than one. |
+| `--reporter text\|json\|junit` | Output format. Defaults to `text` (the execution log + a pass/fail summary). |
+| `--out <file>` | Write the report to a file instead of stdout. |
+| `--workspaces-dir <path>` | Override the workspaces root (defaults to the same `settings.json` the GUI uses). |
+| `--user-data-dir <path>` | Override where certificates are read from. |
+
+Exit code is `0` only if every node ran without error and the flow reached its **End** node — anything else (a 4xx/5xx response, a script error, a misconfigured node) exits `1`, making it a straightforward CI gate. The `junit` reporter emits one `<testcase>` per Request/Retry node with a `<failure>` element on error, ready for any CI system's JUnit test-report viewer; `json` dumps the full per-node results and execution log for custom tooling.
+
+```bash
+postrebel run "Advances API" --workspace New-Advances --env AWS-INT --reporter junit --out results.xml
+```
+
 ### Importing
 
 The **⬆️ Import** button in the top menu bar opens the import dialog, which has four tabs:
@@ -638,6 +679,7 @@ npm run dist         # Create distributable packages
 - ✅ **Collection Variables editor** - Collection-scoped variables (the ones `pm.collectionVariables` reads/writes) now have their own editor — **Edit Variables** in a collection's **···** menu — with the same secret-marking, sort, and bulk-edit support as the Environment editor. Importing a Postman v2 collection with a top-level `variable[]` array now populates these directly (in addition to the existing synthetic `"<name> Variables"` Environment, kept for `{{variable}}` substitution compatibility), and exporting a collection writes them back out as Postman's own `variable[]` array.
 - ✅ **Persistent request/response console** - The **Console** tab in the response panel now shows a DevTools-style log that accumulates across every ad-hoc request sent this session (not reset when you switch requests or send a new one) — capped at the most recent 500 entries. Each sent request logs its fully-resolved method/URL/headers (variables substituted, auth headers included) and its response status/timing; pre-request and test script `console.log`/`console.warn`/`console.error` output is interleaved in the same log, color-coded by level, with real per-entry timestamps. **Clear** resets it.
 - ✅ **Nested collection folders** - Folders can now contain sub-folders at any depth — use the 📁 **Add sub-folder** button on any folder header. Request counts, rename, delete, drag-and-drop (dragging a request into/out of any folder, at any depth), Postman import/export (nested `item[]`), and OpenAPI export (nested folders become a `"Parent/Child"` tag path) all work recursively. One deliberate limitation: dragging a *folder* to reorder it only works at the collection root today — a nested folder's own position among its siblings can't be changed via drag yet (create/rename/delete still work at any depth).
+- ✅ **Headless CLI runner** - `postrebel run <collection> --workspace <name> [--env <name>] [--runner <name>] [--reporter text|json|junit] [--out <file>]` runs a saved Collection Runner flow from a terminal/CI job with no Electron/GUI process — see [Headless CLI Runner](#headless-cli-runner) below.
 
 🚧 **Planned:**
 - Workspace templates
@@ -648,12 +690,11 @@ npm run dist         # Create distributable packages
 **Design principle: stay local-first.** PostRebel will not grow a cloud account, hosted sync, or team-server component — that's the single biggest recurring complaint about Postman (forced login just to save a collection, "always online" requirements, tightening free-tier pricing). Everything below should work fully offline, with git as the only sharing mechanism.
 
 **From a Bruno/Postman feature comparison, in priority order:**
-1. **Headless CLI runner** - `postrebel run <collection> --env staging` producing JUnit/JSON output, reusing the existing Collection Runner execution engine without Electron/GUI. This is the main reason teams pick Bruno over Postman for CI.
-2. **OAuth2 auth type** (Authorization Code + PKCE, Client Credentials) - The biggest real-world auth gap. Needs an Electron-native redirect strategy (loopback `127.0.0.1` server + system browser, and/or a custom URI scheme) rather than depending on any hosted relay service.
-3. **GraphQL request support** - Query editor, variables pane, and schema introspection on URL entry.
-4. **Data-file-driven runs** - Run a request/flow once per row of an external CSV/JSON file, distinct from the existing For Each node (which iterates response data, not an external file).
-5. **OpenAPI drift check** - Re-importing a spec into an existing collection shows an added/removed/changed diff instead of blindly merging.
-6. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
+1. **OAuth2 auth type** (Authorization Code + PKCE, Client Credentials) - The biggest real-world auth gap. Needs an Electron-native redirect strategy (loopback `127.0.0.1` server + system browser, and/or a custom URI scheme) rather than depending on any hosted relay service.
+2. **GraphQL request support** - Query editor, variables pane, and schema introspection on URL entry.
+3. **Data-file-driven runs** - Run a request/flow once per row of an external CSV/JSON file, distinct from the existing For Each node (which iterates response data, not an external file).
+4. **OpenAPI drift check** - Re-importing a spec into an existing collection shows an added/removed/changed diff instead of blindly merging.
+5. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
 
 Explicitly out of scope as a result of the local-first principle: mock servers, monitors/scheduled runs, team SSO/SCIM, or any other feature that requires a hosted service.
 
