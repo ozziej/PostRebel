@@ -5,6 +5,21 @@ export interface KeyValuePair {
   isSecret?: boolean;
 }
 
+export interface OAuth2Config {
+  grantType: 'client_credentials' | 'password' | 'authorization_code' | 'refresh_token';
+  accessTokenUrl: string;
+  clientId?: string;
+  clientSecret?: string;
+  username?: string; // password grant
+  password?: string; // password grant
+  scope?: string;
+  authorizationCode?: string; // authorization_code grant (obtained manually, outside PostRebel)
+  redirectUri?: string; // authorization_code grant
+  refreshToken?: string; // refresh_token grant (or a manually-supplied refresh token)
+  clientAuthentication?: 'body' | 'basic'; // how client_id/client_secret are sent to the token endpoint; default 'body'
+  headerPrefix?: string; // Authorization header scheme; default 'Bearer'
+}
+
 export interface ApiRequest {
   id: string;
   name: string;
@@ -21,10 +36,11 @@ export interface ApiRequest {
     graphql?: { query: string; variables: string; operationName?: string };
   };
   auth?: {
-    type: 'none' | 'bearer' | 'basic' | 'jwt' | 'inherit';
+    type: 'none' | 'bearer' | 'basic' | 'jwt' | 'oauth2' | 'inherit';
     bearer?: string;
     basic?: { username: string; password: string };
     jwt?: string;
+    oauth2?: OAuth2Config;
   };
   preRequestScript?: string;
   testScript?: string;
@@ -45,10 +61,11 @@ export interface Collection {
   variables?: Record<string, string>; // Collection-scoped script variables (pm.collectionVariables) — legacy flat map, synced from variablesArray
   variablesArray?: EnvironmentVariable[]; // New format with secret support (isSecret values are split into <name>.secrets.json, like environments)
   auth?: {
-    type: 'none' | 'bearer' | 'basic' | 'jwt';
+    type: 'none' | 'bearer' | 'basic' | 'jwt' | 'oauth2';
     bearer?: string;
     basic?: { username: string; password: string };
     jwt?: string;
+    oauth2?: OAuth2Config;
   };
 }
 

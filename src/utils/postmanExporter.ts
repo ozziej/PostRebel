@@ -20,6 +20,30 @@ function exportAuth(auth: ApiRequest['auth'] | Collection['auth']): any | undefi
     // lands as an Authorization header when opened in Postman.
     return { type: 'bearer', bearer: [{ key: 'token', value: auth.jwt || '', type: 'string' }] };
   }
+  if (auth.type === 'oauth2' && auth.oauth2) {
+    const o = auth.oauth2;
+    const grantTypeByOurs: Record<string, string> = {
+      client_credentials: 'client_credentials',
+      password: 'password_credentials',
+      authorization_code: 'authorization_code',
+      refresh_token: 'authorization_code', // Postman has no standalone refresh_token grant; closest fit
+    };
+    return {
+      type: 'oauth2',
+      oauth2: [
+        { key: 'grant_type', value: grantTypeByOurs[o.grantType] || 'client_credentials', type: 'string' },
+        { key: 'accessTokenUrl', value: o.accessTokenUrl || '', type: 'string' },
+        { key: 'clientId', value: o.clientId || '', type: 'string' },
+        { key: 'clientSecret', value: o.clientSecret || '', type: 'string' },
+        { key: 'username', value: o.username || '', type: 'string' },
+        { key: 'password', value: o.password || '', type: 'string' },
+        { key: 'scope', value: o.scope || '', type: 'string' },
+        { key: 'redirect_uri', value: o.redirectUri || '', type: 'string' },
+        { key: 'tokenName', value: 'access_token', type: 'string' },
+        { key: 'client_authentication', value: o.clientAuthentication === 'basic' ? 'header' : 'body', type: 'string' },
+      ],
+    };
+  }
   return { type: 'noauth' };
 }
 

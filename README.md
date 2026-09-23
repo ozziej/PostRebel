@@ -9,7 +9,7 @@ A local API testing tool with git support - your Postman alternative.
 
 ✅ **Current Features:**
 - Make API calls (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)
-- Authentication support (Bearer, Basic, JWT)
+- Authentication support (Bearer, Basic, JWT, OAuth 2.0)
 - Variable templating with `{{variable}}` syntax
 - **Dynamic / predefined variables** — built-in variables like `{{randomUuid}}`, `{{currentISODate}}`, `{{randomSAIDNumber}}` and Postman-compatible aliases (`{{$guid}}`, `{{$timestamp}}`, `{{$randomInt}}` etc.) — resolved fresh on every request with no environment setup required
 - Pre-request and test scripts with Postman-compatible `pm` object
@@ -31,7 +31,7 @@ A local API testing tool with git support - your Postman alternative.
 - **Request history** - Per-request execution log showing status, timing, and size; persisted per workspace and auto-pruned to a configurable maximum
 - **Saved responses** - Snapshot and name any response for future reference; saved responses are listed under their parent request in the sidebar
 - **Collection folders** - Group requests inside a collection, with sub-folders nested at any depth; add folders manually or have them created automatically on OpenAPI import (one folder per tag); drag and drop to reorder and move requests between folders at any depth
-- **Collection authentication** — set Bearer, Basic, or JWT auth once at the collection level; individual requests inherit it with "Inherit from Collection"; **Save & Apply to All** button sets every request in the collection to inherit in one click
+- **Collection authentication** — set Bearer, Basic, JWT, or OAuth 2.0 auth once at the collection level; individual requests inherit it with "Inherit from Collection"; **Save & Apply to All** button sets every request in the collection to inherit in one click
 - **Copy response** - Copy the full formatted response body to the clipboard with one click (📋 Copy button)
 - **Find in request/response** - `Cmd+F` / `Ctrl+F` searches across all request and response content with plain text, case-sensitive, whole-word, and regex modes
 - **Keyboard shortcuts** - Configurable shortcuts for common actions (Send: `Cmd+Enter` / `Ctrl+Enter`); customise in Settings
@@ -519,7 +519,7 @@ Paste an OpenAPI 3.x or Swagger 2.0 spec (JSON or YAML). PostRebel will:
 - Parse all paths and HTTP methods into `ApiRequest` objects
 - Convert `{pathParam}` path parameters to `{{pathParam}}` variable syntax
 - Append required query parameters as `{{paramName}}` placeholders
-- Map security schemes (Bearer, Basic, API Key, OAuth2) to the appropriate auth type
+- Map security schemes (Bearer, Basic, API Key, OAuth2) to the appropriate auth type — an OAuth2 scheme's Client Credentials/Password/Authorization Code flow becomes a real OAuth 2.0 auth config with its token URL and scopes pre-filled (just add your client ID/secret); an implicit-only flow has no token endpoint to drive headlessly, so it imports as an empty Bearer token instead
 - Extract request body examples or generate one from the schema
 - If multiple named examples exist for an operation, create one request per example
 - Group operations by their first tag into **collection folders**; untagged operations go to the collection root
@@ -542,8 +542,8 @@ If nothing changed, importing is reported as a no-op rather than re-running the 
 
 Right-click (or click **···** on) any collection in the sidebar to export it:
 
-- **Export (Postman)** - Downloads a Postman v2.1 collection JSON file (`<name>.postman_collection.json`). Requests, folders, headers, bodies, Bearer/Basic auth, and pre-request/test scripts are converted to Postman's native shapes. `jwt`-type auth is exported as Bearer (Postman has no native JWT auth type); `inherit`-type auth is omitted so the item inherits from its parent, matching Postman's own convention. Collection variables (`pm.collectionVariables`) are written to a top-level `variable[]` array, matching Postman's own schema — Postman's collection-variable schema has no secret type, so these export with `type: "string"` regardless of the `isSecret` flag on PostRebel's side.
-- **Export (OpenAPI)** - Downloads an OpenAPI 3.0 spec JSON file (`<name>.openapi.json`). `{{variable}}` placeholders in the URL path become `{variable}` path parameters, template-valued query/header params become OpenAPI query/header parameters, folders become tags, and Bearer/Basic auth become `securitySchemes`. The most common request host across the collection becomes the spec's `servers` entry.
+- **Export (Postman)** - Downloads a Postman v2.1 collection JSON file (`<name>.postman_collection.json`). Requests, folders, headers, bodies, Bearer/Basic/OAuth2 auth, and pre-request/test scripts are converted to Postman's native shapes. `jwt`-type auth is exported as Bearer (Postman has no native JWT auth type); `inherit`-type auth is omitted so the item inherits from its parent, matching Postman's own convention. Collection variables (`pm.collectionVariables`) are written to a top-level `variable[]` array, matching Postman's own schema — Postman's collection-variable schema has no secret type, so these export with `type: "string"` regardless of the `isSecret` flag on PostRebel's side.
+- **Export (OpenAPI)** - Downloads an OpenAPI 3.0 spec JSON file (`<name>.openapi.json`). `{{variable}}` placeholders in the URL path become `{variable}` path parameters, template-valued query/header params become OpenAPI query/header parameters, folders become tags, and Bearer/Basic/OAuth2 auth become `securitySchemes` (OAuth2's grant type becomes the matching `flows` entry, with its token URL and scopes). The most common request host across the collection becomes the spec's `servers` entry.
 
 Both exports round-trip through PostRebel's own importers, but some information is necessarily lossy going the other way — e.g. Postman's arbitrarily nested sub-folders are flattened to one level on import, so a collection with deep nesting won't regain it after an export/import cycle.
 
@@ -620,6 +620,18 @@ Selecting **GraphQL** as the body type gives you:
 - Postman's own `graphql` body mode round-trips through both the importer and exporter, so a Postman collection with GraphQL requests imports and exports correctly.
 
 **Format buttons preserve undo** — clicking **{ } Format** on any JSON or GraphQL field is a normal, undoable edit (`Cmd`/`Ctrl+Z` reverts it in one step), not a silent replace. `{{variable}}` placeholders (quoted or bare) are left exactly as written — only whitespace/indentation changes around them.
+
+### OAuth 2.0 Authentication
+
+Selecting **OAuth 2.0** as the Auth type (on a request, or once at the collection level via **Collection Authentication**) fetches an access token automatically before the request runs, instead of requiring you to paste one in by hand:
+
+- **Grant types** — Client Credentials, Password Credentials, Authorization Code (using a code you already obtained — PostRebel has no interactive browser-redirect capture, so this grant is for pasting in a code from elsewhere, not driving the consent screen itself), and Refresh Token.
+- **Client authentication** — send `client_id`/`client_secret` as request-body fields (default) or as a `Basic` Authorization header, per most providers' expectations.
+- **Get Access Token** button fetches and previews a token on demand (masked, showing only the first/last few characters) so you can confirm the flow works before sending any real request.
+- **Token caching** — a fetched token is reused for every request that shares the same token URL/client/scope until it's close to expiring, so a Runner with many OAuth2-protected nodes (or many CLI requests in one run) fetches a token once, not per-request. Tokens are cached in memory only, never written to disk, and are re-fetched fresh the next time the app or CLI starts. If the token response includes a `refresh_token`, it's used to refresh rather than re-running the original grant.
+- **Code generation** — since the token isn't known until request time, generated cURL/fetch/Python snippets include a first step that fetches the token, then use it in the actual request's `Authorization` header.
+- **Import/export** — Postman's own `oauth2` auth type and OpenAPI/Swagger `oauth2` security schemes (Client Credentials, Password, Authorization Code flows) round-trip through PostRebel's importers/exporters. An `implicit`-only OpenAPI flow has no token endpoint to call headlessly, so it still imports as an empty Bearer token to fill in by hand.
+- Works identically from the [headless CLI runner](#headless-cli-runner) — there's no Electron-only dependency, since the token exchange is just another HTTP request.
 
 ### Response Syntax Highlighting
 
@@ -724,6 +736,7 @@ npm run dist         # Create distributable packages
 - ✅ **Data-file-driven runs** - Run any Collection Runner flow once per row of an external CSV/JSON file, injecting that row's columns as `{{variables}}` (highest precedence, above the environment and Start-node overrides). Works both in the GUI (📄 **Data File** button on the runner toolbar; each row gets its own Run History entry tagged "Row N/M") and the CLI (`--data rows.csv`, with one JUnit `<testsuite>` or one row in the JSON/text report per row) — see [Headless CLI Runner](#headless-cli-runner) below.
 - ✅ **GraphQL request support** - A **GraphQL** body type with a Query editor and a separate Variables (JSON) editor, sent as `POST {query, variables}`; schema introspection fires automatically on URL entry, showing a Queries/Mutations field list. Round-trips through Postman import/export. See [GraphQL Requests](#graphql-requests) above. No autocomplete-in-editor yet — see the note there.
 - ✅ **OpenAPI drift check** - Re-importing a spec into an existing collection now diffs against it by method+path instead of blindly duplicating everything — shows added/changed/removed endpoints (with `field: before → after` detail for changes) before you commit, preserves request IDs across updates so runners/history/saved-responses stay valid, and never deletes a removed endpoint unless you explicitly tick it. See [Drift check](#drift-check-re-importing-into-an-existing-collection) above.
+- ✅ **OAuth2 auth type** - Client Credentials, Password Credentials, Authorization Code (code obtained elsewhere), and Refresh Token grants, at both the request and collection level. Tokens are fetched and cached automatically (in-memory only, shared across requests/runner nodes using the same client+token URL until near expiry), with a **Get Access Token** test button, generated-code support (cURL/fetch/Python fetch the token first, then use it), and Postman/OpenAPI import-export round-tripping. Works identically in the headless CLI runner. See [OAuth 2.0 Authentication](#oauth-20-authentication) above. The interactive Authorization Code + PKCE browser-redirect flow (loopback server + system browser) is intentionally not implemented — it has no headless-CLI equivalent, so it's out of scope for now.
 
 🚧 **Planned:**
 - Workspace templates
@@ -734,8 +747,7 @@ npm run dist         # Create distributable packages
 **Design principle: stay local-first.** PostRebel will not grow a cloud account, hosted sync, or team-server component — that's the single biggest recurring complaint about Postman (forced login just to save a collection, "always online" requirements, tightening free-tier pricing). Everything below should work fully offline, with git as the only sharing mechanism.
 
 **From a Bruno/Postman feature comparison, in priority order:**
-1. **OAuth2 auth type** (Authorization Code + PKCE, Client Credentials) - The biggest real-world auth gap. Needs an Electron-native redirect strategy (loopback `127.0.0.1` server + system browser, and/or a custom URI scheme) rather than depending on any hosted relay service.
-2. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
+1. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
 
 Explicitly out of scope as a result of the local-first principle: mock servers, monitors/scheduled runs, team SSO/SCIM, or any other feature that requires a hosted service.
 

@@ -37,3 +37,49 @@ describe('generatePython - graphql body', () => {
     expect(python).toContain('json={"query":"{ posts { id } }","variables":{"limit":"7"}}');
   });
 });
+
+function makeOAuth2Request(): ApiRequest {
+  return {
+    id: 'r1',
+    name: 'Protected',
+    method: 'GET',
+    url: 'https://api.example.com/me',
+    headers: {},
+    auth: {
+      type: 'oauth2',
+      oauth2: {
+        grantType: 'client_credentials',
+        accessTokenUrl: 'https://auth.example.com/oauth/token',
+        clientId: 'my-client',
+        clientSecret: 'my-secret',
+        scope: 'read',
+      },
+    },
+  };
+}
+
+describe('generateCurl - oauth2 auth', () => {
+  it('generates a token-fetch preamble and references it in the Authorization header', () => {
+    const curl = generateCurl(makeOAuth2Request(), env, null);
+    expect(curl).toContain("curl -s -X POST 'https://auth.example.com/oauth/token'");
+    expect(curl).toContain('grant_type=client_credentials');
+    expect(curl).toContain('client_id=my-client');
+    expect(curl).toContain('-H "Authorization: Bearer $ACCESS_TOKEN"');
+  });
+});
+
+describe('generateFetch - oauth2 auth', () => {
+  it('fetches a token first, then uses it in the Authorization header', () => {
+    const fetch = generateFetch(makeOAuth2Request(), env, null);
+    expect(fetch).toContain("await fetch('https://auth.example.com/oauth/token'");
+    expect(fetch).toContain("'Authorization': `Bearer ${access_token}`,");
+  });
+});
+
+describe('generatePython - oauth2 auth', () => {
+  it('requests a token first, then uses it in the Authorization header', () => {
+    const python = generatePython(makeOAuth2Request(), env, null);
+    expect(python).toContain("token_response = requests.post(");
+    expect(python).toContain("'Authorization': f'Bearer {access_token}'");
+  });
+});

@@ -3,6 +3,61 @@ import { exportPostmanCollection, exportPostmanEnvironment } from '../../utils/p
 import { importPostmanCollection, importPostmanEnvironment } from '../../utils/postmanImporter';
 import { Collection, Environment } from '../../types';
 
+describe('exportPostmanCollection - oauth2 auth', () => {
+  it('exports client_credentials oauth2 auth and round-trips back through the importer', () => {
+    const collection: Collection = {
+      id: '1',
+      name: 'OAuth2 Collection',
+      requests: [
+        {
+          id: 'r1',
+          name: 'Get Me',
+          method: 'GET',
+          url: 'https://api.example.com/me',
+          headers: {},
+          auth: {
+            type: 'oauth2',
+            oauth2: {
+              grantType: 'client_credentials',
+              accessTokenUrl: 'https://auth.example.com/token',
+              clientId: 'cid',
+              clientSecret: 'secret',
+              scope: 'read write',
+              clientAuthentication: 'basic',
+            },
+          },
+        },
+      ],
+    };
+
+    const exported = exportPostmanCollection(collection);
+    const item = exported.item[0];
+    expect(item.request.auth.type).toBe('oauth2');
+    const get = (key: string) => item.request.auth.oauth2.find((o: any) => o.key === key)?.value;
+    expect(get('grant_type')).toBe('client_credentials');
+    expect(get('accessTokenUrl')).toBe('https://auth.example.com/token');
+    expect(get('clientId')).toBe('cid');
+    expect(get('client_authentication')).toBe('header');
+
+    const reimported = importPostmanCollection(JSON.stringify(exported));
+    const reimportedAuth = reimported.collection.requests[0].auth;
+    expect(reimportedAuth).toEqual({
+      type: 'oauth2',
+      oauth2: {
+        grantType: 'client_credentials',
+        accessTokenUrl: 'https://auth.example.com/token',
+        clientId: 'cid',
+        clientSecret: 'secret',
+        username: '',
+        password: '',
+        scope: 'read write',
+        redirectUri: '',
+        clientAuthentication: 'basic',
+      },
+    });
+  });
+});
+
 describe('exportPostmanCollection', () => {
   it('exports a top-level request with headers, JSON body, bearer auth, and scripts', () => {
     const collection: Collection = {

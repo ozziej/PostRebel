@@ -166,6 +166,8 @@ function resolveRequest(request: ApiRequest, vars: Record<string, string>): ApiR
       auth = { ...auth, basic: { username: sub(auth.basic.username), password: sub(auth.basic.password) } };
     else if (auth.type === 'jwt' && auth.jwt)
       auth = { ...auth, jwt: sub(auth.jwt) };
+    else if (auth.type === 'oauth2' && auth.oauth2)
+      auth = { ...auth, oauth2: { ...auth.oauth2, accessTokenUrl: sub(auth.oauth2.accessTokenUrl), clientId: auth.oauth2.clientId ? sub(auth.oauth2.clientId) : auth.oauth2.clientId } };
   }
 
   return { ...request, url: sub(request.url), headers, body, auth };

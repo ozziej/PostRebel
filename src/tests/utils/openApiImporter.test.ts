@@ -238,3 +238,76 @@ describe('importOpenApi - request body generation', () => {
     expect(request.headers.optionalTrace).toBeUndefined();
   });
 });
+
+describe('importOpenApi - oauth2 security schemes', () => {
+  it('maps an OpenAPI 3 clientCredentials flow to a real oauth2 auth config', () => {
+    const spec = {
+      openapi: '3.0.1',
+      info: { title: 'Test API' },
+      servers: [{ url: 'http://localhost:8080' }],
+      components: {
+        securitySchemes: {
+          oauth2: {
+            type: 'oauth2',
+            flows: { clientCredentials: { tokenUrl: 'https://auth.example.com/token', scopes: { read: 'Read access' } } },
+          },
+        },
+      },
+      security: [{ oauth2: [] }],
+      paths: {
+        '/things': { get: { operationId: 'listThings', responses: { '200': { description: 'OK' } } } },
+      },
+    };
+
+    const result = importOpenApi(JSON.stringify(spec));
+    const request = findRequest(result.collection, 'listThings');
+    expect(request.auth).toEqual({
+      type: 'oauth2',
+      oauth2: { grantType: 'client_credentials', accessTokenUrl: 'https://auth.example.com/token', scope: 'read' },
+    });
+  });
+
+  it('maps a Swagger 2.0 application flow to a client_credentials oauth2 auth config', () => {
+    const spec = {
+      swagger: '2.0',
+      info: { title: 'Test API' },
+      host: 'api.example.com',
+      basePath: '/',
+      securityDefinitions: {
+        oauth2: { type: 'oauth2', flow: 'application', tokenUrl: 'https://auth.example.com/token', scopes: {} },
+      },
+      security: [{ oauth2: [] }],
+      paths: {
+        '/things': { get: { operationId: 'listThings', responses: { '200': { description: 'OK' } } } },
+      },
+    };
+
+    const result = importOpenApi(JSON.stringify(spec));
+    const request = findRequest(result.collection, 'listThings');
+    expect(request.auth).toEqual({
+      type: 'oauth2',
+      oauth2: { grantType: 'client_credentials', accessTokenUrl: 'https://auth.example.com/token', scope: '' },
+    });
+  });
+
+  it('falls back to an empty bearer stub for an implicit-only flow (no token endpoint to call headlessly)', () => {
+    const spec = {
+      openapi: '3.0.1',
+      info: { title: 'Test API' },
+      servers: [{ url: 'http://localhost:8080' }],
+      components: {
+        securitySchemes: {
+          oauth2: { type: 'oauth2', flows: { implicit: { authorizationUrl: 'https://auth.example.com/authorize', scopes: {} } } },
+        },
+      },
+      security: [{ oauth2: [] }],
+      paths: {
+        '/things': { get: { operationId: 'listThings', responses: { '200': { description: 'OK' } } } },
+      },
+    };
+
+    const result = importOpenApi(JSON.stringify(spec));
+    const request = findRequest(result.collection, 'listThings');
+    expect(request.auth).toEqual({ type: 'bearer', bearer: '' });
+  });
+});

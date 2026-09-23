@@ -58,6 +58,22 @@ function exportSecurity(auth: ApiRequest['auth'], securitySchemes: Record<string
     securitySchemes.basicAuth = { type: 'http', scheme: 'basic' };
     return [{ basicAuth: [] }];
   }
+  if (auth.type === 'oauth2' && auth.oauth2) {
+    const flowByGrantType: Record<string, string> = {
+      client_credentials: 'clientCredentials',
+      password: 'password',
+      authorization_code: 'authorizationCode',
+      refresh_token: 'clientCredentials',
+    };
+    const flowName = flowByGrantType[auth.oauth2.grantType] || 'clientCredentials';
+    const tokenUrl = (auth.oauth2.accessTokenUrl || '').replace(/\{\{(\w+)\}\}/g, '{$1}');
+    const flow: any = { tokenUrl, scopes: {} };
+    if (auth.oauth2.scope) {
+      auth.oauth2.scope.split(/\s+/).filter(Boolean).forEach(s => { flow.scopes[s] = s; });
+    }
+    securitySchemes.oauth2Auth = { type: 'oauth2', flows: { [flowName]: flow } };
+    return [{ oauth2Auth: [] }];
+  }
   return undefined;
 }
 

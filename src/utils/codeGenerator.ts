@@ -1,5 +1,6 @@
-import { ApiRequest, Environment, Collection } from '../types';
+import { ApiRequest, Environment, Collection, OAuth2Config } from '../types';
 import { resolveDynamicVariable } from './dynamicVariables';
+import { buildOAuth2TokenRequest, resolveOAuth2Vars, OAuth2TokenRequest } from './oauth2';
 
 /**
  * Substitute {{varName}} placeholders with environment values.
@@ -33,17 +34,17 @@ function substituteVars(text: string, env: Environment | null): string {
  * Resolve authentication header value based on request and collection auth.
  * Mirrors httpService.ts auth logic.
  */
+function resolveEffectiveAuth(request: ApiRequest, collection: Collection | null): ApiRequest['auth'] {
+  if (request.auth?.type === 'inherit' && collection?.auth) return collection.auth;
+  return request.auth;
+}
+
 function resolveAuthHeader(
   request: ApiRequest,
   collection: Collection | null,
   env: Environment | null
 ): string | null {
-  let effectiveAuth = request.auth;
-
-  // Handle inherited auth
-  if (request.auth?.type === 'inherit' && collection?.auth) {
-    effectiveAuth = collection.auth;
-  }
+  const effectiveAuth = resolveEffectiveAuth(request, collection);
 
   if (!effectiveAuth || effectiveAuth.type === 'none') {
     return null;
@@ -67,9 +68,27 @@ function resolveAuthHeader(
       const token = substituteVars(effectiveAuth.jwt || '', env);
       return `JWT ${token}`;
     }
+    // 'oauth2' is handled separately by buildOAuth2Preamble — the token is
+    // fetched by a preamble request, not a value known at generation time.
   }
 
   return null;
+}
+
+// Resolves a request's OAuth2 config (following collection inheritance) with
+// variables substituted, or null if this request isn't using OAuth2 auth.
+// The token itself can't be known at code-generation time, so callers embed
+// a preamble that fetches it and reference `headerPrefix` for the header scheme.
+function getEffectiveOAuth2Request(
+  request: ApiRequest,
+  collection: Collection | null,
+  env: Environment | null
+): { tokenRequest: OAuth2TokenRequest; headerPrefix: string } | null {
+  const effectiveAuth = resolveEffectiveAuth(request, collection);
+  if (effectiveAuth?.type !== 'oauth2' || !effectiveAuth.oauth2) return null;
+  const replaceVariables = (text: string) => substituteVars(text, env);
+  const resolved = resolveOAuth2Vars(effectiveAuth.oauth2, (env || {}) as Environment, replaceVariables);
+  return { tokenRequest: buildOAuth2TokenRequest(resolved), headerPrefix: resolved.headerPrefix?.trim() || 'Bearer' };
 }
 
 /**
@@ -119,16 +138,33 @@ export function generateCurl(
   collection: Collection | null
 ): string {
   const url = substituteVars(request.url, environment);
-  const authHeader = resolveAuthHeader(request, collection, environment);
+  const oauth2 = getEffectiveOAuth2Request(request, collection, environment);
+  const authHeader = oauth2 ? null : resolveAuthHeader(request, collection, environment);
   const headers = buildHeaders(request, environment, authHeader);
 
   const lines: string[] = [];
+
+  if (oauth2) {
+    lines.push(`# 1. Get an OAuth2 access token`);
+    lines.push(`ACCESS_TOKEN=$(curl -s -X POST '${oauth2.tokenRequest.url}' \\`);
+    Object.entries(oauth2.tokenRequest.headers).forEach(([key, value]) => {
+      lines.push(`  -H '${key}: ${value}' \\`);
+    });
+    lines.push(`  --data-raw '${oauth2.tokenRequest.body}' \\`);
+    lines.push(`  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")`);
+    lines.push('');
+    lines.push(`# 2. Use it to call the API`);
+  }
+
   lines.push(`curl -X ${request.method} '${url}'`);
 
   // Add headers
   Object.entries(headers).forEach(([key, value]) => {
     lines.push(`  -H '${key}: ${value}'`);
   });
+  if (oauth2) {
+    lines.push(`  -H "Authorization: ${oauth2.headerPrefix} $ACCESS_TOKEN"`);
+  }
 
   // Add body
   if (request.body && request.body.type !== 'none' && ['POST', 'PUT', 'PATCH'].includes(request.method)) {
@@ -191,19 +227,40 @@ export function generateFetch(
   collection: Collection | null
 ): string {
   const url = substituteVars(request.url, environment);
-  const authHeader = resolveAuthHeader(request, collection, environment);
+  const oauth2 = getEffectiveOAuth2Request(request, collection, environment);
+  const authHeader = oauth2 ? null : resolveAuthHeader(request, collection, environment);
   const headers = buildHeaders(request, environment, authHeader);
 
   const lines: string[] = [];
+
+  if (oauth2) {
+    lines.push(`// 1. Get an OAuth2 access token`);
+    lines.push(`const tokenResponse = await fetch('${oauth2.tokenRequest.url}', {`);
+    lines.push(`  method: 'POST',`);
+    lines.push(`  headers: {`);
+    Object.entries(oauth2.tokenRequest.headers).forEach(([key, value]) => {
+      lines.push(`    '${key}': '${value.replace(/'/g, "\\'")}',`);
+    });
+    lines.push(`  },`);
+    lines.push(`  body: '${oauth2.tokenRequest.body.replace(/'/g, "\\'")}',`);
+    lines.push(`});`);
+    lines.push(`const { access_token } = await tokenResponse.json();`);
+    lines.push('');
+    lines.push(`// 2. Use it to call the API`);
+  }
+
   lines.push(`const response = await fetch('${url}', {`);
   lines.push(`  method: '${request.method}',`);
 
   // Add headers if present
-  if (Object.keys(headers).length > 0) {
+  if (Object.keys(headers).length > 0 || oauth2) {
     lines.push(`  headers: {`);
     Object.entries(headers).forEach(([key, value]) => {
       lines.push(`    '${key}': '${value.replace(/'/g, "\\'")}',`);
     });
+    if (oauth2) {
+      lines.push(`    'Authorization': \`${oauth2.headerPrefix} \${access_token}\`,`);
+    }
     lines.push(`  },`);
   }
 
@@ -271,12 +328,29 @@ export function generatePython(
   collection: Collection | null
 ): string {
   const url = substituteVars(request.url, environment);
-  const authHeader = resolveAuthHeader(request, collection, environment);
+  const oauth2 = getEffectiveOAuth2Request(request, collection, environment);
+  const authHeader = oauth2 ? null : resolveAuthHeader(request, collection, environment);
   const headers = buildHeaders(request, environment, authHeader);
 
   const lines: string[] = [];
   lines.push(`import requests`);
   lines.push(``);
+
+  if (oauth2) {
+    const tokenHeaderEntries = Object.entries(oauth2.tokenRequest.headers).map(([key, value]) => {
+      const escapedValue = value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      return `'${key}': '${escapedValue}'`;
+    });
+    lines.push(`# 1. Get an OAuth2 access token`);
+    lines.push(`token_response = requests.post(`);
+    lines.push(`    '${oauth2.tokenRequest.url}',`);
+    lines.push(`    headers={${tokenHeaderEntries.join(', ')}},`);
+    lines.push(`    data='${oauth2.tokenRequest.body.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}',`);
+    lines.push(`)`);
+    lines.push(`access_token = token_response.json()['access_token']`);
+    lines.push(``);
+    lines.push(`# 2. Use it to call the API`);
+  }
 
   const method = request.method.toLowerCase();
   const args: string[] = [];
@@ -285,11 +359,14 @@ export function generatePython(
   args.push(`    '${url}'`);
 
   // Headers
-  if (Object.keys(headers).length > 0) {
+  if (Object.keys(headers).length > 0 || oauth2) {
     const headerEntries = Object.entries(headers).map(([key, value]) => {
       const escapedValue = value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       return `'${key}': '${escapedValue}'`;
     });
+    if (oauth2) {
+      headerEntries.push(`'Authorization': f'${oauth2.headerPrefix} {access_token}'`);
+    }
     args.push(`    headers={${headerEntries.join(', ')}}`);
   }
 

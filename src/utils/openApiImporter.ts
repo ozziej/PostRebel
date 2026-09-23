@@ -13,6 +13,47 @@ function generateId(): string {
   return `${Date.now()}-${++_idCounter}-${Math.random().toString(36).substr(2, 5)}`;
 }
 
+function firstScope(scopes: Record<string, string> | undefined): string {
+  return scopes ? Object.keys(scopes).join(' ') : '';
+}
+
+// Swagger 2.0 securityDefinitions oauth2 has a single `flow` + `tokenUrl` pair.
+// `implicit` has no token endpoint to call headlessly, so it falls back to a
+// plain bearer stub the user fills in by hand — same as before this existed.
+function oauth2AuthFromSwagger2(secDef: any): ApiRequest['auth'] {
+  const flowToGrantType: Record<string, 'client_credentials' | 'password' | 'authorization_code'> = {
+    application: 'client_credentials',
+    password: 'password',
+    accessCode: 'authorization_code',
+  };
+  const grantType = flowToGrantType[secDef.flow];
+  if (!grantType || !secDef.tokenUrl) {
+    return { type: 'bearer', bearer: '' };
+  }
+  return {
+    type: 'oauth2',
+    oauth2: { grantType, accessTokenUrl: secDef.tokenUrl, scope: firstScope(secDef.scopes) },
+  };
+}
+
+// OpenAPI 3 securitySchemes oauth2 has a `flows` map keyed by flow name, each
+// with its own tokenUrl — pick the first flow we can drive headlessly.
+function oauth2AuthFromOpenApi3(secDef: any): ApiRequest['auth'] {
+  const flows = secDef.flows || {};
+  const preference: Array<{ key: string; grantType: 'client_credentials' | 'password' | 'authorization_code' }> = [
+    { key: 'clientCredentials', grantType: 'client_credentials' },
+    { key: 'password', grantType: 'password' },
+    { key: 'authorizationCode', grantType: 'authorization_code' },
+  ];
+  for (const { key, grantType } of preference) {
+    const flow = flows[key];
+    if (flow?.tokenUrl) {
+      return { type: 'oauth2', oauth2: { grantType, accessTokenUrl: flow.tokenUrl, scope: firstScope(flow.scopes) } };
+    }
+  }
+  return { type: 'bearer', bearer: '' };
+}
+
 const MAX_SCHEMA_DEPTH = 8;
 
 function generateExampleFromSchema(
@@ -175,7 +216,7 @@ export function importOpenApi(input: string): OpenApiImportResult {
             if (secDef.type === 'basic') {
               auth = { type: 'basic', basic: { username: '', password: '' } };
             } else if (secDef.type === 'oauth2') {
-              auth = { type: 'bearer', bearer: '' };
+              auth = oauth2AuthFromSwagger2(secDef);
             } else if (secDef.type === 'apiKey') {
               if (secDef.in === 'header') {
                 headers[secDef.name] = `{{${firstSecKey}}}`;
@@ -192,7 +233,9 @@ export function importOpenApi(input: string): OpenApiImportResult {
               if (secDef.in === 'header') {
                 headers[secDef.name] = `{{${firstSecKey}}}`;
               }
-            } else if (secDef.type === 'oauth2' || secDef.type === 'openIdConnect') {
+            } else if (secDef.type === 'oauth2') {
+              auth = oauth2AuthFromOpenApi3(secDef);
+            } else if (secDef.type === 'openIdConnect') {
               auth = { type: 'bearer', bearer: '' };
             }
           }

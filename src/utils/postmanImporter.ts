@@ -213,6 +213,29 @@ function parsePostmanRequest(item: any, name: string, errors: string[]): ApiRequ
           password: passwordItem?.value || '',
         },
       };
+    } else if (authType === 'oauth2') {
+      const oauth2Array = req.auth.oauth2 || [];
+      const get = (key: string) => oauth2Array.find((o: any) => o.key === key)?.value;
+      const grantTypeByPostman: Record<string, 'client_credentials' | 'password' | 'authorization_code' | 'refresh_token'> = {
+        client_credentials: 'client_credentials',
+        password_credentials: 'password',
+        authorization_code: 'authorization_code',
+        authorization_code_with_pkce: 'authorization_code',
+      };
+      auth = {
+        type: 'oauth2',
+        oauth2: {
+          grantType: grantTypeByPostman[get('grant_type')] || 'client_credentials',
+          accessTokenUrl: get('accessTokenUrl') || '',
+          clientId: get('clientId') || '',
+          clientSecret: get('clientSecret') || '',
+          username: get('username') || '',
+          password: get('password') || '',
+          scope: get('scope') || '',
+          redirectUri: get('redirect_uri') || '',
+          clientAuthentication: get('client_authentication') === 'header' ? 'basic' : 'body',
+        },
+      };
     } else if (authType === 'noauth') {
       auth = { type: 'none' };
     } else {

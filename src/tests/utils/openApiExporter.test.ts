@@ -73,6 +73,29 @@ describe('exportOpenApi', () => {
     expect(spec.paths['/b'].get.security).toEqual([{ basicAuth: [] }]);
   });
 
+  it('maps oauth2 auth to a securityScheme flow matching the grant type', () => {
+    const collection: Collection = {
+      id: '1',
+      name: 'API',
+      requests: [
+        {
+          id: 'r1', name: 'A', method: 'GET', url: 'https://api.example.com/a', headers: {},
+          auth: {
+            type: 'oauth2',
+            oauth2: { grantType: 'client_credentials', accessTokenUrl: '{{baseUrl}}/oauth/token', scope: 'read write' },
+          },
+        },
+      ],
+    };
+
+    const { spec } = exportOpenApi(collection);
+    expect(spec.components.securitySchemes.oauth2Auth).toEqual({
+      type: 'oauth2',
+      flows: { clientCredentials: { tokenUrl: '{baseUrl}/oauth/token', scopes: { read: 'read', write: 'write' } } },
+    });
+    expect(spec.paths['/a'].get.security).toEqual([{ oauth2Auth: [] }]);
+  });
+
   it('groups tagged (folder) requests and untagged (top-level) requests correctly', () => {
     const collection: Collection = {
       id: '1',

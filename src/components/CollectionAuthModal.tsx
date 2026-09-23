@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Collection, Environment } from '../types';
 import { VariableInput } from './VariableInput';
+import { OAuth2Fields } from './OAuth2Fields';
 import { mapAllRequests } from '../utils/collectionTree';
 
 interface CollectionAuthModalProps {
@@ -151,14 +152,19 @@ export const CollectionAuthModal: React.FC<CollectionAuthModalProps> = ({
             }}
             value={authConfig?.type || 'none'}
             onChange={(e) => {
-              const type = e.target.value as 'none' | 'bearer' | 'basic' | 'jwt';
-              setAuthConfig(type === 'none' ? { type: 'none' } : { type });
+              const type = e.target.value as 'none' | 'bearer' | 'basic' | 'jwt' | 'oauth2';
+              if (type === 'oauth2') {
+                setAuthConfig({ type, oauth2: authConfig?.oauth2 || { grantType: 'client_credentials', accessTokenUrl: '' } });
+              } else {
+                setAuthConfig({ type });
+              }
             }}
           >
             <option value="none">No Authentication</option>
             <option value="bearer">Bearer Token</option>
             <option value="basic">Basic Authentication (Username/Password)</option>
             <option value="jwt">JWT Token</option>
+            <option value="oauth2">OAuth 2.0</option>
           </select>
         </div>
 
@@ -300,6 +306,17 @@ export const CollectionAuthModal: React.FC<CollectionAuthModalProps> = ({
             }}>
               {'Example: {{jwt_token}} or paste your actual JWT'}
             </small>
+          </div>
+        )}
+
+        {authConfig?.type === 'oauth2' && (
+          <div style={{ marginBottom: '1.5rem' }}>
+            <OAuth2Fields
+              value={authConfig.oauth2 || { grantType: 'client_credentials', accessTokenUrl: '' }}
+              onChange={(oauth2) => updateAuth({ oauth2 })}
+              environment={environment}
+              onUpdateVariable={onUpdateVariable}
+            />
           </div>
         )}
 

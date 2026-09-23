@@ -8,6 +8,7 @@ import { RunnerCanvas } from './RunnerCanvas';
 import { generateCurl, generateFetch, generatePython } from '../utils/codeGenerator';
 import { scanKeyValueForSecret } from '../utils/secretScanner';
 import { HttpService } from '../utils/httpService';
+import { OAuth2Fields } from './OAuth2Fields';
 import { INTROSPECTION_QUERY, parseIntrospectionResult, extractIntrospectionErrors, GraphQLSchemaSummary } from '../utils/graphqlIntrospection';
 import jsonlint from 'jsonlint-mod';
 
@@ -951,22 +952,30 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
               value={localRequest.auth?.type || 'none'}
               onChange={(e) => {
                 const type = e.target.value as any;
-                updateRequest({
-                  auth: type === 'none' ? undefined : { type }
-                });
+                if (type === 'none') {
+                  updateRequest({ auth: undefined });
+                } else if (type === 'oauth2') {
+                  updateRequest({
+                    auth: { type, oauth2: localRequest.auth?.oauth2 || { grantType: 'client_credentials', accessTokenUrl: '' } }
+                  });
+                } else {
+                  updateRequest({ auth: { type } });
+                }
               }}
             >
               {activeCollection?.auth && (
                 <option value="inherit">
                   Inherit from Collection ({activeCollection.auth.type === 'bearer' ? 'Bearer Token' :
                                           activeCollection.auth.type === 'basic' ? 'Basic Auth' :
-                                          activeCollection.auth.type === 'jwt' ? 'JWT' : 'No Auth'})
+                                          activeCollection.auth.type === 'jwt' ? 'JWT' :
+                                          activeCollection.auth.type === 'oauth2' ? 'OAuth 2.0' : 'No Auth'})
                 </option>
               )}
               <option value="none">No Auth</option>
               <option value="bearer">Bearer Token</option>
               <option value="basic">Basic Auth</option>
               <option value="jwt">JWT</option>
+              <option value="oauth2">OAuth 2.0</option>
             </select>
           </div>
 
@@ -1043,6 +1052,15 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
             </div>
           )}
 
+          {localRequest.auth?.type === 'oauth2' && (
+            <OAuth2Fields
+              value={localRequest.auth.oauth2 || { grantType: 'client_credentials', accessTokenUrl: '' }}
+              onChange={(oauth2) => updateRequest({ auth: { type: 'oauth2', oauth2 } })}
+              environment={environment}
+              onUpdateVariable={onUpdateVariable}
+            />
+          )}
+
           {localRequest.auth?.type === 'inherit' && activeCollection?.auth && (
             <div style={{ backgroundColor: '#f8f9fa', padding: '1rem', borderRadius: '0.5rem', border: '1px solid #e9ecef' }}>
               <div style={{ fontSize: '0.9rem', color: '#6c757d', marginBottom: '1rem', fontStyle: 'italic' }}>
@@ -1117,6 +1135,21 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                     To edit this value, use the 🔐 button on the collection in the sidebar
                   </small>
                 </div>
+              )}
+
+              {activeCollection.auth.type === 'oauth2' && activeCollection.auth.oauth2 && (
+                <>
+                  <OAuth2Fields
+                    value={activeCollection.auth.oauth2}
+                    onChange={() => {}} // Read-only
+                    environment={environment}
+                    onUpdateVariable={onUpdateVariable}
+                    disabled
+                  />
+                  <small style={{ color: '#6c757d', fontSize: '0.8rem' }}>
+                    To edit these values, use the 🔐 button on the collection in the sidebar
+                  </small>
+                </>
               )}
             </div>
           )}

@@ -1,5 +1,6 @@
 import { ApiRequest, ApiResponse, Environment, Certificate, Collection } from '../types';
 import { resolveDynamicVariable } from './dynamicVariables';
+import { getOAuth2AccessToken } from './oauth2';
 
 export interface ResolvedRequestInfo {
   method: string;
@@ -82,6 +83,15 @@ export class HttpService {
             const jwtToken = this.replaceVariables(effectiveAuth.jwt || '', environment);
             headers['Authorization'] = `JWT ${jwtToken}`;
             break;
+          case 'oauth2': {
+            if (effectiveAuth.oauth2) {
+              const { accessToken, headerPrefix } = await getOAuth2AccessToken(
+                effectiveAuth.oauth2, environment, transport, (t, e) => this.replaceVariables(t, e),
+              );
+              headers['Authorization'] = `${headerPrefix} ${accessToken}`;
+            }
+            break;
+          }
         }
       }
 
@@ -264,8 +274,11 @@ export class HttpService {
         let errorTitle = 'Network Error';
         let troubleshooting = '';
 
-        // Certificate errors
-        if (error.code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' ||
+        if (error.oauth2) {
+          errorTitle = 'OAuth2 Token Error';
+          errorMessage = error.message;
+          troubleshooting = `Failed to obtain an OAuth2 access token.\n\n${error.message}\n\nCheck the access token URL, client credentials, and grant type in the request's Auth tab.`;
+        } else if (error.code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' ||
             error.code === 'DEPTH_ZERO_SELF_SIGNED_CERT' ||
             error.code === 'SELF_SIGNED_CERT_IN_CHAIN' ||
             error.code === 'CERT_HAS_EXPIRED' ||
