@@ -78,6 +78,7 @@ describe('runCli end-to-end against a local HTTP server', () => {
       requests: [
         { id: 'r-ok', name: 'Get OK', method: 'GET', url: '{{baseUrl}}/ok', headers: {} },
         { id: 'r-fail', name: 'Get Fail', method: 'GET', url: '{{baseUrl}}/fail', headers: {} },
+        { id: 'r-dynamic', name: 'Get Path', method: 'GET', url: '{{baseUrl}}/{{path}}', headers: {} },
       ],
     };
     await fs.writeFile(path.join(wsPath, 'collections', 'Demo.json'), JSON.stringify(collection, null, 2));
@@ -119,6 +120,21 @@ describe('runCli end-to-end against a local HTTP server', () => {
       ],
     };
     await fs.writeFile(path.join(wsPath, 'runners', 'run-fail.json'), JSON.stringify(failingRunner, null, 2));
+
+    const dataDrivenRunner = {
+      ...baseRunner,
+      id: 'run-data',
+      name: 'DataDriven',
+      nodes: [
+        { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: { label: 'Start' } },
+        { id: 'req1', type: 'request', position: { x: 0, y: 0 }, data: { label: 'Get Path', requestId: 'r-dynamic' } },
+        { id: 'end', type: 'end', position: { x: 0, y: 0 }, data: { label: 'End' } },
+      ],
+    };
+    await fs.writeFile(path.join(wsPath, 'runners', 'run-data.json'), JSON.stringify(dataDrivenRunner, null, 2));
+
+    await fs.writeFile(path.join(tmpRoot, 'rows.csv'), 'path\nok\nfail\nok\n');
+    await fs.writeFile(path.join(tmpRoot, 'rows.json'), JSON.stringify([{ path: 'ok' }, { path: 'fail' }]));
   });
 
   afterAll(async () => {
@@ -216,5 +232,73 @@ describe('runCli end-to-end against a local HTTP server', () => {
     expect(logs.length).toBe(0);
     const content = await fs.readFile(outFile, 'utf-8');
     expect(content).toContain('Run success');
+  });
+
+  it('runs the flow once per CSV row, exits 1 when any row fails, and reports each row as text', async () => {
+    const logs: string[] = [];
+    const code = await runCli(
+      ['run', 'Demo', '--workspace', 'TestWorkspace', '--env', 'Local', '--runner', 'DataDriven', '--data', path.join(tmpRoot, 'rows.csv'), '--workspaces-dir', workspacesDir, '--user-data-dir', userDataDir],
+      (line) => logs.push(line),
+    );
+    expect(code).toBe(1);
+    const output = logs.join('\n');
+    expect(output).toContain('── Row 1/3: path=ok ──');
+    expect(output).toContain('── Row 2/3: path=fail ──');
+    expect(output).toContain('── Row 3/3: path=ok ──');
+    expect(output).toContain('✓ Row 1 success');
+    expect(output).toContain('✗ Row 2 error');
+    expect(output).toContain('✓ Row 3 success');
+    expect(output).toContain('Data-driven run: 2/3 row(s) passed');
+  });
+
+  it('runs the flow once per JSON row and reports as JSON with per-row data', async () => {
+    const logs: string[] = [];
+    const code = await runCli(
+      ['run', 'Demo', '--workspace', 'TestWorkspace', '--env', 'Local', '--runner', 'DataDriven', '--data', path.join(tmpRoot, 'rows.json'), '--reporter', 'json', '--workspaces-dir', workspacesDir, '--user-data-dir', userDataDir],
+      (line) => logs.push(line),
+    );
+    expect(code).toBe(1);
+    const parsed = JSON.parse(logs[0]);
+    expect(parsed.dataFile).toContain('rows.json');
+    expect(parsed.status).toBe('error');
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows[0].row).toEqual({ path: 'ok' });
+    expect(parsed.rows[0].status).toBe('success');
+    expect(parsed.rows[1].row).toEqual({ path: 'fail' });
+    expect(parsed.rows[1].status).toBe('error');
+  });
+
+  it('produces one <testsuite> per row for --reporter junit with --data', async () => {
+    const logs: string[] = [];
+    const code = await runCli(
+      ['run', 'Demo', '--workspace', 'TestWorkspace', '--env', 'Local', '--runner', 'DataDriven', '--data', path.join(tmpRoot, 'rows.json'), '--reporter', 'junit', '--workspaces-dir', workspacesDir, '--user-data-dir', userDataDir],
+      (line) => logs.push(line),
+    );
+    expect(code).toBe(1);
+    const xml = logs[0];
+    expect(xml).toContain('<testsuites>');
+    expect((xml.match(/<testsuite /g) || []).length).toBe(2);
+    expect(xml).toContain('<failure');
+  });
+
+  it('exits 0 for a data-driven run when every row succeeds', async () => {
+    const allOkFile = path.join(tmpRoot, 'rows-all-ok.csv');
+    await fs.writeFile(allOkFile, 'path\nok\nok\n');
+    const code = await runCli(
+      ['run', 'Demo', '--workspace', 'TestWorkspace', '--env', 'Local', '--runner', 'DataDriven', '--data', allOkFile, '--workspaces-dir', workspacesDir, '--user-data-dir', userDataDir],
+      () => {},
+    );
+    expect(code).toBe(0);
+  });
+
+  it('errors clearly when the data file does not exist', async () => {
+    const errors: string[] = [];
+    const code = await runCli(
+      ['run', 'Demo', '--workspace', 'TestWorkspace', '--runner', 'DataDriven', '--data', path.join(tmpRoot, 'missing.csv'), '--workspaces-dir', workspacesDir, '--user-data-dir', userDataDir],
+      undefined,
+      (line) => errors.push(line),
+    );
+    expect(code).toBe(1);
+    expect(errors[0]).toContain('missing.csv');
   });
 });

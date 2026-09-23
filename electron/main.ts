@@ -1084,6 +1084,29 @@ ipcMain.handle('select-json-file', async () => {
   }
 });
 
+ipcMain.handle('select-data-file', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'Data Files', extensions: ['csv', 'json'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, error: 'No file selected' };
+    }
+
+    const filePath = result.filePaths[0];
+    const fileName = path.basename(filePath);
+    const content = await fs.readFile(filePath, 'utf-8');
+    return { success: true, fileName, content };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 // History management
 ipcMain.handle('load-history', async (event, workspaceId) => {
   try {

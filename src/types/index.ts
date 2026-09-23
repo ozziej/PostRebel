@@ -12,12 +12,13 @@ export interface ApiRequest {
   url: string;
   headers: Record<string, string>;
   body?: {
-    type: 'none' | 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'binary';
+    type: 'none' | 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'binary' | 'graphql';
     rawSubtype?: 'text' | 'javascript' | 'json' | 'html' | 'xml';
     data: string | FormData | Record<string, string>;
     formData?: Array<KeyValuePair>;
     binaryFilePath?: string;
     binaryFileName?: string;
+    graphql?: { query: string; variables: string; operationName?: string };
   };
   auth?: {
     type: 'none' | 'bearer' | 'basic' | 'jwt' | 'inherit';
@@ -189,6 +190,11 @@ export interface RunHistory {
   status: 'success' | 'error' | 'aborted';
   logs: RunnerLogEntry[];
   nodeResults: Record<string, RunnerNodeResult>;
+  // Data-file-driven runs: one history entry per row, tagged with its position
+  // and a human-readable label (e.g. "userId=alice, active=true").
+  rowIndex?: number;
+  rowCount?: number;
+  rowLabel?: string;
 }
 
 export interface ScriptContext {
@@ -245,6 +251,7 @@ declare global {
       // Import
       selectJsonFile: () => Promise<{ success: boolean; content?: string; error?: string }>;
       selectBinaryFile: () => Promise<{ success: boolean; filePath?: string; fileName?: string; base64Data?: string; error?: string }>;
+      selectDataFile: () => Promise<{ success: boolean; fileName?: string; content?: string; error?: string }>;
 
       // History
       loadHistory: (workspaceId: string) => Promise<{ success: boolean; entries?: RequestHistoryEntry[]; error?: string }>;

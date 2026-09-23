@@ -406,7 +406,7 @@ console.log('all vars:', variables);
 
 Configure an **array source** and an **item variable prefix** (`item`). The array source can be:
 - `body` — when the response body **is** the array (e.g. `[{...}, {...}]`)
-- `body.field` — a nested path (e.g. `body.data.advances`)
+- `body.field` — a nested path (e.g. `body.data.test`)
 - a variable name — mapped from a previous edge
 
 Each item's fields are available as `{{item.fieldName}}` (dot notation) or `{{item_fieldName}}` (underscore). Both work in URLs, headers, and bodies. The node has two source handles: **body** (bottom-left, per-item sequence) and **done** (bottom-right, after all items).
@@ -432,9 +432,18 @@ variables.baseUrl + '/api/v2'    // concatenate
 variables.userId.toLowerCase()   // normalise
 ```
 
+#### Data File — data-driven runs
+
+Click **📄 Data File** on the runner toolbar to pick a CSV or JSON file. Once loaded (shown as a chip, e.g. `rows.csv (3 rows)`), **Run** executes the whole flow once per row instead of once total — each row's columns are injected as `{{variables}}` with the highest precedence (above the environment and any Start-node overrides), so a column named `userId` is available as `{{userId}}` for that row's requests only.
+
+- CSV: first row is the header (column names); each subsequent row is one run.
+- JSON: an array of flat objects, e.g. `[{"userId": "1"}, {"userId": "2"}]`.
+
+The execution log shows a `── Row N/M: ... ──` separator before each row, and node colors reset between rows. Click the **✕** next to the chip to clear it and go back to a single run.
+
 #### Run history
 
-Every completed run is saved automatically. Click the **History** toolbar button to open the run history panel — each entry shows status, time, duration, and a node summary. Click a row to expand its execution log for comparison or debugging.
+Every completed run is saved automatically. Click the **History** toolbar button to open the run history panel — each entry shows status, time, duration, and a node summary. Click a row to expand its execution log for comparison or debugging. A data-driven run saves one entry per row, tagged **📄 Row N/M** with that row's values.
 
 #### Saving and reverting
 
@@ -475,6 +484,7 @@ You must create the Runner flow itself in the GUI first — the CLI executes an 
 | `--env <name>` | Environment to run against. Omit to run with no environment variables. |
 | `--runner <name>` | Which runner to execute, by name. Required only if the collection has more than one. |
 | `--reporter text\|json\|junit` | Output format. Defaults to `text` (the execution log + a pass/fail summary). |
+| `--data <file.csv\|.json>` | Run the flow once per row of this data file instead of once total — see below. |
 | `--out <file>` | Write the report to a file instead of stdout. |
 | `--workspaces-dir <path>` | Override the workspaces root (defaults to the same `settings.json` the GUI uses). |
 | `--user-data-dir <path>` | Override where certificates are read from. |
@@ -482,7 +492,13 @@ You must create the Runner flow itself in the GUI first — the CLI executes an 
 Exit code is `0` only if every node ran without error and the flow reached its **End** node — anything else (a 4xx/5xx response, a script error, a misconfigured node) exits `1`, making it a straightforward CI gate. The `junit` reporter emits one `<testcase>` per Request/Retry node with a `<failure>` element on error, ready for any CI system's JUnit test-report viewer; `json` dumps the full per-node results and execution log for custom tooling.
 
 ```bash
-postrebel run "Advances API" --workspace New-Advances --env AWS-INT --reporter junit --out results.xml
+postrebel run "Test API" --workspace New-Test --env AWS-INT --reporter junit --out results.xml
+```
+
+**Data-driven runs** (`--data rows.csv` or `--data rows.json`) run the same flow once per row, with that row's columns injected as `{{variables}}` for that run only — the same mechanism as the GUI's 📄 **Data File** button above. Exit code is `0` only if every row succeeds. Reporters adapt accordingly: `text` prints a `── Row N/M ──` section per row plus an overall `X/N row(s) passed` summary; `json` returns `{ dataFile, status, rows: [...] }` with one full result object per row; `junit` emits one `<testsuite>` per row (named `<runner> [row N: col=value]`) inside a `<testsuites>` root, so each row shows up as its own suite in a CI test-report viewer.
+
+```bash
+postrebel run "Test API" --workspace New-Test --env AWS-INT --data users.csv --reporter junit --out results.xml
 ```
 
 ### Importing
@@ -577,8 +593,19 @@ The body tab supports several content types:
 - **x-www-form-urlencoded** - Key-value pairs encoded as URL parameters.
 - **form-data** - Multipart form data with key-value pairs.
 - **Binary** - Upload a file from disk. Click "Select File" to choose, and "Clear" to remove.
+- **GraphQL** - A **Query** editor and a separate **Variables (JSON)** editor, sent as a single `POST` with body `{query, variables}`. Selecting GraphQL sets the method to `POST` automatically. See below.
 
 The correct `Content-Type` header is set automatically based on your selection.
+
+### GraphQL Requests
+
+Selecting **GraphQL** as the body type gives you:
+
+- **Query** — the GraphQL query/mutation text, with `{{variable}}` substitution like any other field.
+- **Variables (JSON)** — a separate JSON object sent alongside the query (`{"id": "{{userId}}"}`), with the same live JSON validation as a raw JSON body.
+- **Schema introspection on URL entry** — whenever the URL changes (typing pauses ~800ms) while GraphQL is selected, PostRebel automatically sends the standard introspection query to that endpoint and shows a **Queries** / **Mutations** list (name, arguments, return type) so you can see what's available without leaving the app. Click **🔍 Fetch Schema** / **🔄 Refresh Schema** to trigger it manually, or **Show/Hide Schema** to toggle the panel. This is a field-listing summary, not full autocomplete-in-editor — the query editor itself is a plain text field with no schema-aware suggestions yet.
+- An optional `operationName` is supported on the wire (for documents with multiple named operations) but has no dedicated UI field yet — set it via a script or a future update if you need it.
+- Postman's own `graphql` body mode round-trips through both the importer and exporter, so a Postman collection with GraphQL requests imports and exports correctly.
 
 ### Response Syntax Highlighting
 
@@ -680,6 +707,8 @@ npm run dist         # Create distributable packages
 - ✅ **Persistent request/response console** - The **Console** tab in the response panel now shows a DevTools-style log that accumulates across every ad-hoc request sent this session (not reset when you switch requests or send a new one) — capped at the most recent 500 entries. Each sent request logs its fully-resolved method/URL/headers (variables substituted, auth headers included) and its response status/timing; pre-request and test script `console.log`/`console.warn`/`console.error` output is interleaved in the same log, color-coded by level, with real per-entry timestamps. **Clear** resets it.
 - ✅ **Nested collection folders** - Folders can now contain sub-folders at any depth — use the 📁 **Add sub-folder** button on any folder header. Request counts, rename, delete, drag-and-drop (dragging a request into/out of any folder, at any depth), Postman import/export (nested `item[]`), and OpenAPI export (nested folders become a `"Parent/Child"` tag path) all work recursively. One deliberate limitation: dragging a *folder* to reorder it only works at the collection root today — a nested folder's own position among its siblings can't be changed via drag yet (create/rename/delete still work at any depth).
 - ✅ **Headless CLI runner** - `postrebel run <collection> --workspace <name> [--env <name>] [--runner <name>] [--reporter text|json|junit] [--out <file>]` runs a saved Collection Runner flow from a terminal/CI job with no Electron/GUI process — see [Headless CLI Runner](#headless-cli-runner) below.
+- ✅ **Data-file-driven runs** - Run any Collection Runner flow once per row of an external CSV/JSON file, injecting that row's columns as `{{variables}}` (highest precedence, above the environment and Start-node overrides). Works both in the GUI (📄 **Data File** button on the runner toolbar; each row gets its own Run History entry tagged "Row N/M") and the CLI (`--data rows.csv`, with one JUnit `<testsuite>` or one row in the JSON/text report per row) — see [Headless CLI Runner](#headless-cli-runner) below.
+- ✅ **GraphQL request support** - A **GraphQL** body type with a Query editor and a separate Variables (JSON) editor, sent as `POST {query, variables}`; schema introspection fires automatically on URL entry, showing a Queries/Mutations field list. Round-trips through Postman import/export. See [GraphQL Requests](#graphql-requests) above. No autocomplete-in-editor yet — see the note there.
 
 🚧 **Planned:**
 - Workspace templates
@@ -691,10 +720,8 @@ npm run dist         # Create distributable packages
 
 **From a Bruno/Postman feature comparison, in priority order:**
 1. **OAuth2 auth type** (Authorization Code + PKCE, Client Credentials) - The biggest real-world auth gap. Needs an Electron-native redirect strategy (loopback `127.0.0.1` server + system browser, and/or a custom URI scheme) rather than depending on any hosted relay service.
-2. **GraphQL request support** - Query editor, variables pane, and schema introspection on URL entry.
-3. **Data-file-driven runs** - Run a request/flow once per row of an external CSV/JSON file, distinct from the existing For Each node (which iterates response data, not an external file).
-4. **OpenAPI drift check** - Re-importing a spec into an existing collection shows an added/removed/changed diff instead of blindly merging.
-5. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
+2. **OpenAPI drift check** - Re-importing a spec into an existing collection shows an added/removed/changed diff instead of blindly merging.
+3. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
 
 Explicitly out of scope as a result of the local-first principle: mock servers, monitors/scheduled runs, team SSO/SCIM, or any other feature that requires a hosted service.
 

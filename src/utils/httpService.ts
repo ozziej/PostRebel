@@ -183,6 +183,27 @@ export class HttpService {
             // Don't set Content-Type, let axios handle it for form-data
             delete headers['Content-Type'];
             break;
+          case 'graphql': {
+            const gql = request.body.graphql;
+            const query = this.replaceVariables(gql?.query || '', environment);
+            const variablesText = this.replaceVariables(gql?.variables || '', environment);
+            let variables: any;
+            if (variablesText.trim()) {
+              try {
+                variables = JSON.parse(variablesText);
+              } catch (e) {
+                console.error('[HTTP Service] Invalid GraphQL variables JSON, sending without variables:', e);
+              }
+            }
+            const payload: any = { query };
+            if (variables !== undefined) payload.variables = variables;
+            if (gql?.operationName?.trim()) payload.operationName = this.replaceVariables(gql.operationName, environment);
+            config.data = JSON.stringify(payload);
+            if (!headers['Content-Type']) {
+              headers['Content-Type'] = 'application/json';
+            }
+            break;
+          }
         }
       }
 

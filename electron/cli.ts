@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { executeRunner } from '../src/utils/runnerExecutor';
+import { executeRunner, executeRunnerForDataRows } from '../src/utils/runnerExecutor';
+import { parseDataRows, detectDataFileFormat } from '../src/utils/dataFile';
 import { Runner, RunnerNodeResult, RunnerLogEntry, Environment } from '../src/types';
 import { executeHttpConfig } from './httpTransport';
 import {
   getDefaultUserDataDir, resolveWorkspacesDir,
   loadCollections, loadEnvironments, loadRunners, loadCertificates,
 } from './workspaceStore';
-import { formatJson, formatJUnit, formatText, CliRunResult } from './reporters';
+import {
+  formatJson, formatJUnit, formatText, CliRunResult,
+  formatJsonDataDriven, formatJUnitDataDriven, formatTextDataDriven, CliDataRunResult, CliDataRowResult,
+} from './reporters';
 
 export interface CliOptions {
   collectionName: string;
@@ -19,9 +23,10 @@ export interface CliOptions {
   out?: string;
   workspacesDir?: string;
   userDataDir?: string;
+  data?: string;
 }
 
-const USAGE = 'Usage: postrebel run <collection> --workspace <name> [--env <name>] [--runner <name>] [--reporter text|json|junit] [--out <file>]';
+const USAGE = 'Usage: postrebel run <collection> --workspace <name> [--env <name>] [--runner <name>] [--reporter text|json|junit] [--data <file.csv|.json>] [--out <file>]';
 
 // Pure argv parsing — kept separate from I/O so it's trivially unit-testable.
 export function parseArgs(argv: string[]): CliOptions {
@@ -65,6 +70,7 @@ export function parseArgs(argv: string[]): CliOptions {
     out: opts.out,
     workspacesDir: opts['workspaces-dir'],
     userDataDir: opts['user-data-dir'],
+    data: opts.data,
   };
 }
 
@@ -124,6 +130,78 @@ export async function runCli(
 
   const certificates = await loadCertificates(userDataDir);
 
+  // ── Data-file-driven run: same flow, once per row of an external file ─────
+  if (opts.data) {
+    let content: string;
+    try {
+      content = await fs.readFile(opts.data, 'utf-8');
+    } catch (err: any) {
+      logError(`Could not read data file "${opts.data}": ${err.message}`);
+      return 1;
+    }
+    const { rows, errors } = parseDataRows(content, detectDataFileFormat(opts.data));
+    if (errors.length > 0) {
+      logError(errors[0]);
+      return 1;
+    }
+    if (rows.length === 0) {
+      logError(`Data file "${opts.data}" has no rows`);
+      return 1;
+    }
+
+    const rowResults = await executeRunnerForDataRows(
+      runner, collection, environment, certificates, rows,
+      () => {},
+      () => {},
+      undefined,
+      undefined,
+      undefined,
+      executeHttpConfig,
+    );
+
+    const dataRows: CliDataRowResult[] = rowResults.map(rowResult => {
+      const hasError = Object.values(rowResult.nodeResults).some(r => r.status === 'error');
+      const reachedEnd = runner!.nodes.some(n => n.type === 'end' && rowResult.nodeResults[n.id]?.status === 'success');
+      const timestamps = rowResult.logs.map(l => l.timestamp).filter((t): t is number => t != null);
+      const startedAt = timestamps.length ? new Date(timestamps[0]).toISOString() : new Date().toISOString();
+      const completedAt = timestamps.length ? new Date(timestamps[timestamps.length - 1]).toISOString() : startedAt;
+      const durationMs = timestamps.length ? timestamps[timestamps.length - 1] - timestamps[0] : 0;
+      return {
+        runner: { id: runner!.id, name: runner!.name },
+        collection: { id: collection.id, name: collection.name },
+        environment: environment?.name ?? null,
+        status: hasError || !reachedEnd ? 'error' : 'success',
+        startedAt, completedAt, durationMs,
+        nodeResults: rowResult.nodeResults,
+        logs: rowResult.logs,
+        rowIndex: rowResult.rowIndex,
+        row: rowResult.row,
+      };
+    });
+
+    const dataResult: CliDataRunResult = {
+      runner: { id: runner.id, name: runner.name },
+      collection: { id: collection.id, name: collection.name },
+      environment: environment?.name ?? null,
+      dataFile: opts.data,
+      status: dataRows.every(r => r.status === 'success') ? 'success' : 'error',
+      rows: dataRows,
+    };
+
+    const output = opts.reporter === 'json' ? formatJsonDataDriven(dataResult)
+      : opts.reporter === 'junit' ? formatJUnitDataDriven(dataResult, runner.nodes)
+      : formatTextDataDriven(dataResult);
+
+    if (opts.out) {
+      await fs.writeFile(opts.out, output + '\n');
+    } else {
+      log(output);
+    }
+
+    return dataResult.status === 'success' ? 0 : 1;
+  }
+
+  // ── Single run ──────────────────────────────────────────────────────────────
   const nodeResults: Record<string, RunnerNodeResult> = {};
   const logs: RunnerLogEntry[] = [];
   const startedAt = new Date().toISOString();

@@ -14,3 +14,5 @@ certificates/
 *.secrets.json
 workspaces/**/secrets/
 .claude
+public/test-harness.html
+scripts/smoke-test-cli.mjs

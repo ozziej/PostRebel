@@ -95,6 +95,21 @@ function buildHeaders(
   return headers;
 }
 
+// Builds the {query, variables} JSON payload GraphQL sends as its request body.
+function buildGraphqlPayloadJson(body: ApiRequest['body'], env: Environment | null): string {
+  const query = substituteVars(body?.graphql?.query || '', env);
+  const variablesText = substituteVars(body?.graphql?.variables || '', env);
+  const payload: any = { query };
+  if (variablesText.trim()) {
+    try {
+      payload.variables = JSON.parse(variablesText);
+    } catch {
+      // Invalid variables JSON — omit rather than send a broken payload
+    }
+  }
+  return JSON.stringify(payload);
+}
+
 /**
  * Generate cURL command for the request.
  */
@@ -147,6 +162,12 @@ export function generateCurl(
               lines.push(`  --data-urlencode '${item.key}=${escapedValue}'`);
             });
         }
+        break;
+      }
+      case 'graphql': {
+        const payload = buildGraphqlPayloadJson(request.body, environment);
+        const escapedBody = payload.replace(/'/g, "'\\''");
+        lines.push(`  --data-raw '${escapedBody}'`);
         break;
       }
     }
@@ -225,6 +246,11 @@ export function generateFetch(
           lines.push(`    return params;`);
           lines.push(`  })(),`);
         }
+        break;
+      }
+      case 'graphql': {
+        const payload = buildGraphqlPayloadJson(request.body, environment);
+        lines.push(`  body: JSON.stringify(${payload}),`);
         break;
       }
     }
@@ -317,6 +343,11 @@ export function generatePython(
             });
           args.push(`    data={${dataEntries.join(', ')}}`);
         }
+        break;
+      }
+      case 'graphql': {
+        const payload = buildGraphqlPayloadJson(request.body, environment);
+        args.push(`    json=${payload}`);
         break;
       }
     }

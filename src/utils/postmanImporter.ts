@@ -179,6 +179,15 @@ function parsePostmanRequest(item: any, name: string, errors: string[]): ApiRequ
         data: '',
         formData,
       };
+    } else if (mode === 'graphql') {
+      body = {
+        type: 'graphql',
+        data: '',
+        graphql: {
+          query: req.body.graphql?.query || '',
+          variables: req.body.graphql?.variables || '',
+        },
+      };
     }
   }
 

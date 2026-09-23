@@ -182,6 +182,36 @@ describe('exportPostmanCollection', () => {
     expect(request.auth).toEqual({ type: 'bearer', bearer: 'abc123' });
   });
 
+  it('exports a graphql body as Postman graphql mode, and round-trips it back', () => {
+    const collection: Collection = {
+      id: '1',
+      name: 'GraphQL Coll',
+      requests: [
+        {
+          id: 'r1',
+          name: 'Get Post',
+          method: 'POST',
+          url: 'https://api.example.com/graphql',
+          headers: {},
+          body: { type: 'graphql', data: '', graphql: { query: '{ post(id: 1) { title } }', variables: '{"id": 1}' } },
+        },
+      ],
+    };
+
+    const exported = exportPostmanCollection(collection);
+    expect(exported.item[0].request.body).toEqual({
+      mode: 'graphql',
+      graphql: { query: '{ post(id: 1) { title } }', variables: '{"id": 1}' },
+    });
+
+    const reimported = importPostmanCollection(JSON.stringify(exported));
+    expect(reimported.collection.requests[0].body).toEqual({
+      type: 'graphql',
+      data: '',
+      graphql: { query: '{ post(id: 1) { title } }', variables: '{"id": 1}' },
+    });
+  });
+
   it('exports collection.variablesArray as a top-level Postman variable[] array', () => {
     const collection: Collection = {
       id: '1',

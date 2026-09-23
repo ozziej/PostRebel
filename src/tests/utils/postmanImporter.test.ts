@@ -125,3 +125,27 @@ describe('importPostmanCollection - nested folders', () => {
     expect(result.collection.folders![0].folders).toBeUndefined();
   });
 });
+
+describe('importPostmanCollection - graphql body', () => {
+  it('imports a graphql-mode request into body.type = "graphql"', () => {
+    const postmanCollection = {
+      info: { name: 'My API', schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json' },
+      item: [{
+        name: 'Get Post',
+        request: {
+          method: 'POST',
+          url: 'https://api.example.com/graphql',
+          body: { mode: 'graphql', graphql: { query: '{ post(id: 1) { title } }', variables: '{"id": 1}' } },
+        },
+      }],
+    };
+
+    const result = importPostmanCollection(JSON.stringify(postmanCollection));
+    const request = result.collection.requests[0];
+    expect(request.body).toEqual({
+      type: 'graphql',
+      data: '',
+      graphql: { query: '{ post(id: 1) { title } }', variables: '{"id": 1}' },
+    });
+  });
+});

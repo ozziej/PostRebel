@@ -56,6 +56,12 @@ function exportBody(body: ApiRequest['body']): any | undefined {
   if (body.type === 'binary') {
     return { mode: 'file', file: { src: body.binaryFileName || body.binaryFilePath || '' } };
   }
+  if (body.type === 'graphql') {
+    return {
+      mode: 'graphql',
+      graphql: { query: body.graphql?.query || '', variables: body.graphql?.variables || '' },
+    };
+  }
   return undefined;
 }
 

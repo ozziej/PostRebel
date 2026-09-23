@@ -19,8 +19,9 @@ import {
   Collection, Environment, Certificate, ApiRequest, ApiResponse, DataMapping, RunHistory,
 } from '../types';
 import { StartNode, RequestNode, EndNode, DelayNode, ForEachNode, DebugNode, RetryNode, SetVariableNode } from './RunnerNodes';
-import { executeRunner } from '../utils/runnerExecutor';
+import { executeRunner, executeRunnerForDataRows } from '../utils/runnerExecutor';
 import { flattenRequests, findRequestById } from '../utils/collectionTree';
+import { parseDataRows, detectDataFileFormat } from '../utils/dataFile';
 
 // Node types must be defined outside the component to avoid re-creation on render
 const nodeTypes: NodeTypes = {
@@ -314,6 +315,11 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
   const runnerLogsRef = useRef<RunnerLogEntry[]>([]);
+  const nodeResultsRef = useRef<Record<string, RunnerNodeResult>>({});
+
+  const [dataRows, setDataRows] = useState<Record<string, string>[] | null>(null);
+  const [dataFileName, setDataFileName] = useState<string | null>(null);
+  const [dataFileError, setDataFileError] = useState<string | null>(null);
 
   const showToast = useCallback(() => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -814,10 +820,32 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     setNodes(prev => prev.concat(newNode));
   }, [getCanvasCenter, setNodes]);
 
+  const handlePickDataFile = useCallback(async () => {
+    setDataFileError(null);
+    const result = await window.electronAPI.selectDataFile();
+    if (!result.success || !result.content) {
+      if (result.error && result.error !== 'No file selected') setDataFileError(result.error);
+      return;
+    }
+    const format = detectDataFileFormat(result.fileName || '');
+    const { rows, errors } = parseDataRows(result.content, format);
+    if (errors.length > 0) { setDataFileError(errors[0]); return; }
+    if (rows.length === 0) { setDataFileError('Data file has no rows'); return; }
+    setDataRows(rows);
+    setDataFileName(result.fileName || 'data file');
+  }, []);
+
+  const handleClearDataFile = useCallback(() => {
+    setDataRows(null);
+    setDataFileName(null);
+    setDataFileError(null);
+  }, []);
+
   const handleRun = useCallback(async () => {
     if (isRunning) return;
     setIsRunning(true);
     setNodeResults({});
+    nodeResultsRef.current = {};
     setSelectedNodeId(null);
     setFollowedEdgeIds(new Set());
     setRunnerLogs([]);
@@ -831,6 +859,76 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
     const currentRunner = buildRunnerFromFlow();
     runnerRef.current = currentRunner;
 
+    const appendLog = (entry: RunnerLogEntry) => {
+      const newEntry = { ...entry, timestamp: entry.timestamp ?? Date.now() };
+      setRunnerLogs(prev => {
+        const updated = [...prev, newEntry];
+        runnerLogsRef.current = updated;
+        return updated;
+      });
+    };
+
+    // ── Data-file-driven run: same flow, once per row ──────────────────────
+    if (dataRows && dataRows.length > 0) {
+      const rows = dataRows;
+      appendLog({ level: 'info', message: `📄 Data-driven run: ${rows.length} row(s) from ${dataFileName}` });
+
+      try {
+        const rowResults = await executeRunnerForDataRows(
+          currentRunner, collection, activeEnvironment, certificates, rows,
+          (rowIndex, row) => {
+            setNodeResults({});
+            setFollowedEdgeIds(new Set());
+            setEdges(toFlowEdges(currentRunner.edges, new Set(), false));
+            const rowLabel = Object.entries(row).map(([k, v]) => `${k}=${v}`).join(', ');
+            appendLog({ level: 'info', message: `── Row ${rowIndex + 1}/${rows.length}: ${rowLabel} ──` });
+          },
+          (rowIndex, nodeId, result) => setNodeResults(prev => ({ ...prev, [nodeId]: result })),
+          (rowIndex, edgeId) => setFollowedEdgeIds(prev => new Set([...prev, edgeId])),
+          (rowIndex, entry) => appendLog(entry),
+          abortControllerRef.current?.signal,
+        );
+
+        const failedRows = rowResults.filter(r => Object.values(r.nodeResults).some(nr => nr.status === 'error'));
+        appendLog({
+          level: failedRows.length === 0 ? 'success' : 'warn',
+          message: `📄 Data-driven run complete: ${rowResults.length - failedRows.length}/${rowResults.length} row(s) passed`,
+        });
+
+        rowResults.forEach(rowResult => {
+          const hasError = Object.values(rowResult.nodeResults).some(r => r.status === 'error');
+          const isLastRow = rowResult.rowIndex === rowResults[rowResults.length - 1].rowIndex;
+          const wasAborted = isLastRow && abortControllerRef.current?.signal.aborted;
+          const status: RunHistory['status'] = wasAborted && !hasError ? 'aborted' : hasError ? 'error' : 'success';
+          const timestamps = rowResult.logs.map(l => l.timestamp).filter((t): t is number => t != null);
+          const startedAt = timestamps.length ? new Date(timestamps[0]).toISOString() : new Date().toISOString();
+          const completedAt = timestamps.length ? new Date(timestamps[timestamps.length - 1]).toISOString() : startedAt;
+          const durationMs = timestamps.length ? timestamps[timestamps.length - 1] - timestamps[0] : 0;
+          const entry: RunHistory = {
+            id: `run-${Date.now()}-${rowResult.rowIndex}`,
+            runnerId: runner.id,
+            workspaceId: runner.workspaceId,
+            runnerName: runner.name,
+            startedAt,
+            completedAt,
+            durationMs,
+            status,
+            logs: rowResult.logs,
+            nodeResults: rowResult.nodeResults,
+            rowIndex: rowResult.rowIndex,
+            rowCount: rows.length,
+            rowLabel: Object.entries(rowResult.row).map(([k, v]) => `${k}=${v}`).join(', '),
+          };
+          window.electronAPI.saveRunnerHistory(runner.workspaceId, entry).catch(() => {});
+          setRunHistory(h => [entry, ...h].slice(0, 49));
+        });
+      } finally {
+        setIsRunning(false);
+      }
+      return;
+    }
+
+    // ── Single run ──────────────────────────────────────────────────────────
     try {
       await executeRunner(
         currentRunner,
@@ -838,49 +936,39 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
         activeEnvironment,
         certificates,
         (nodeId, result) => {
-          setNodeResults(prev => ({ ...prev, [nodeId]: result }));
+          nodeResultsRef.current = { ...nodeResultsRef.current, [nodeId]: result };
+          setNodeResults(nodeResultsRef.current);
         },
         (edgeId) => {
           setFollowedEdgeIds(prev => new Set([...prev, edgeId]));
         },
-        (entry) => {
-          const newEntry = { ...entry, timestamp: Date.now() };
-          setRunnerLogs(prev => {
-            const updated = [...prev, newEntry];
-            runnerLogsRef.current = updated;
-            return updated;
-          });
-        },
+        appendLog,
         abortControllerRef.current?.signal,
       );
     } finally {
       const completedAt = new Date().toISOString();
       const durationMs = Date.now() - runStartRef.current;
-      // Save history entry
-      setNodeResults(prev => {
-        const allResults = Object.values(prev);
-        const hasError = allResults.some(r => r.status === 'error');
-        const wasAborted = abortControllerRef.current?.signal.aborted;
-        const runStatus: RunHistory['status'] = wasAborted ? 'aborted' : hasError ? 'error' : 'success';
-        const entry: RunHistory = {
-          id: `run-${Date.now()}`,
-          runnerId: runner.id,
-          workspaceId: runner.workspaceId,
-          runnerName: runner.name,
-          startedAt: new Date(Date.now() - durationMs).toISOString(),
-          completedAt,
-          durationMs,
-          status: runStatus,
-          logs: runnerLogsRef.current,
-          nodeResults: prev,
-        };
-        window.electronAPI.saveRunnerHistory(runner.workspaceId, entry).catch(() => {});
-        setRunHistory(h => [entry, ...h.slice(0, 49)]);
-        return prev;
-      });
+      const finalResults = nodeResultsRef.current;
+      const hasError = Object.values(finalResults).some(r => r.status === 'error');
+      const wasAborted = abortControllerRef.current?.signal.aborted;
+      const runStatus: RunHistory['status'] = wasAborted ? 'aborted' : hasError ? 'error' : 'success';
+      const entry: RunHistory = {
+        id: `run-${Date.now()}`,
+        runnerId: runner.id,
+        workspaceId: runner.workspaceId,
+        runnerName: runner.name,
+        startedAt: new Date(Date.now() - durationMs).toISOString(),
+        completedAt,
+        durationMs,
+        status: runStatus,
+        logs: runnerLogsRef.current,
+        nodeResults: finalResults,
+      };
+      window.electronAPI.saveRunnerHistory(runner.workspaceId, entry).catch(() => {});
+      setRunHistory(h => [entry, ...h.slice(0, 49)]);
       setIsRunning(false);
     }
-  }, [isRunning, buildRunnerFromFlow, collection, activeEnvironment, certificates, toFlowEdges]);
+  }, [isRunning, buildRunnerFromFlow, collection, activeEnvironment, certificates, toFlowEdges, dataRows, dataFileName]);
 
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -1046,6 +1134,31 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
           >
             ⏹ Stop
           </button>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button
+            className={`button ${dataRows ? '' : 'button-secondary'}`}
+            onClick={handlePickDataFile}
+            disabled={isRunning}
+            title="Run this flow once per row of a CSV/JSON data file"
+            style={dataRows ? { background: '#1e3a5f', borderColor: '#3b82f6', color: '#fff' } : undefined}
+          >
+            📄 {dataRows ? `${dataFileName} (${dataRows.length} row${dataRows.length !== 1 ? 's' : ''})` : 'Data File'}
+          </button>
+          {dataRows && (
+            <button
+              className="button button-secondary"
+              onClick={handleClearDataFile}
+              disabled={isRunning}
+              title="Clear data file"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        {dataFileError && (
+          <span style={{ color: '#f87171', fontSize: '0.72rem' }}>{dataFileError}</span>
         )}
 
         <div style={{ position: 'relative' }}>
@@ -1349,7 +1462,14 @@ export const RunnerCanvas: React.FC<RunnerCanvasProps> = ({
                     <span style={{ color: statusColor, flexShrink: 0, fontWeight: 700 }}>{statusIcon}</span>
                     <span style={{ color: '#555', flexShrink: 0 }}>{timeStr}</span>
                     <span style={{ color: '#3a3a3a', flexShrink: 0 }}>{dur}</span>
-                    <span style={{ color: '#666', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
+                    {entry.rowLabel !== undefined && (
+                      <span style={{ color: '#3b82f6', flexShrink: 0, fontSize: '0.7rem' }}>
+                        📄 Row {(entry.rowIndex ?? 0) + 1}/{entry.rowCount}
+                      </span>
+                    )}
+                    <span style={{ color: '#666', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={entry.rowLabel}>
+                      {entry.rowLabel ? `${entry.rowLabel} — ${summary}` : summary}
+                    </span>
                     <span style={{ color: '#333', fontSize: '0.65rem' }}>{isExpanded ? '▲' : '▼'}</span>
                   </div>
                   {isExpanded && (

@@ -639,6 +639,7 @@ export async function executeRunner(
   onLog?: (entry: RunnerLogEntry) => void,
   signal?: AbortSignal,
   transport?: HttpTransport,
+  extraVariables?: Record<string, string>,
 ): Promise<void> {
   // Build outgoing edge map; conditional edges sorted first (unconditional = else fallback)
   const outgoingEdges: Record<string, RunnerEdge[]> = {};
@@ -669,6 +670,10 @@ export async function executeRunner(
   for (const { key, value } of (startNode.data.variables ?? [])) {
     if (key.trim()) localVars[key.trim()] = value;
   }
+  // Data-file-driven runs: one row's columns, highest precedence for this run.
+  if (extraVariables) {
+    localVars = { ...localVars, ...extraVariables };
+  }
 
   onNodeStatusChange(startNode.id, { nodeId: startNode.id, status: 'running' });
   await pause(100, signal);
@@ -686,6 +691,62 @@ export async function executeRunner(
   };
 
   await runSequence(startEdge.target, localVars, null, ctx);
+}
+
+// ── Data-file-driven runs ──────────────────────────────────────────────────────
+// Runs the same flow once per data-file row, injecting that row's columns as
+// {{variables}} with the highest precedence (above the environment and any
+// Start-node overrides). Each row gets its own isolated node-result/log
+// collection, but a failing row does not stop the remaining rows.
+
+export interface DataRowResult {
+  rowIndex: number;
+  row: Record<string, string>;
+  nodeResults: Record<string, RunnerNodeResult>;
+  logs: RunnerLogEntry[];
+}
+
+export async function executeRunnerForDataRows(
+  runner: Runner,
+  collection: Collection,
+  environment: Environment | null,
+  certificates: Certificate[],
+  rows: Record<string, string>[],
+  onRowStart: (rowIndex: number, row: Record<string, string>) => void,
+  onNodeStatusChange: (rowIndex: number, nodeId: string, result: RunnerNodeResult) => void,
+  onEdgeFollowed?: (rowIndex: number, edgeId: string) => void,
+  onLog?: (rowIndex: number, entry: RunnerLogEntry) => void,
+  signal?: AbortSignal,
+  transport?: HttpTransport,
+): Promise<DataRowResult[]> {
+  const results: DataRowResult[] = [];
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    if (signal?.aborted) break;
+    const row = rows[rowIndex];
+    onRowStart(rowIndex, row);
+
+    const nodeResults: Record<string, RunnerNodeResult> = {};
+    const logs: RunnerLogEntry[] = [];
+
+    await executeRunner(
+      runner, collection, environment, certificates,
+      (nodeId, result) => { nodeResults[nodeId] = result; onNodeStatusChange(rowIndex, nodeId, result); },
+      onEdgeFollowed ? (edgeId) => onEdgeFollowed(rowIndex, edgeId) : undefined,
+      (entry) => {
+        const stamped = { ...entry, timestamp: entry.timestamp ?? Date.now() };
+        logs.push(stamped);
+        onLog?.(rowIndex, stamped);
+      },
+      signal,
+      transport,
+      row,
+    );
+
+    results.push({ rowIndex, row, nodeResults, logs });
+  }
+
+  return results;
 }
 
 function pause(ms: number, signal?: AbortSignal): Promise<void> {

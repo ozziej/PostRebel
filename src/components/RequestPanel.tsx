@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ApiRequest, ApiResponse, Environment, RequestHistoryEntry, Collection, Runner, Certificate } from '../types';
 import { KeyValueEditor } from './KeyValueEditor';
 import { VariableInput } from './VariableInput';
@@ -7,6 +7,8 @@ import { findMatches, highlightText } from '../utils/searchHighlight';
 import { RunnerCanvas } from './RunnerCanvas';
 import { generateCurl, generateFetch, generatePython } from '../utils/codeGenerator';
 import { scanKeyValueForSecret } from '../utils/secretScanner';
+import { HttpService } from '../utils/httpService';
+import { INTROSPECTION_QUERY, parseIntrospectionResult, extractIntrospectionErrors, GraphQLSchemaSummary } from '../utils/graphqlIntrospection';
 import jsonlint from 'jsonlint-mod';
 
 function formatRelativeTime(isoDate: string): string {
@@ -83,10 +85,27 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   const [showCodeGen, setShowCodeGen] = useState(false);
   const [codeTab, setCodeTab] = useState<'curl' | 'fetch' | 'python'>('curl');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [graphqlVariablesValidation, setGraphqlVariablesValidation] = useState<{ valid: boolean; message: string } | null>(null);
+  const graphqlVarsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [schemaSummary, setSchemaSummary] = useState<GraphQLSchemaSummary | null>(null);
+  const [schemaLoading, setSchemaLoading] = useState(false);
+  const [schemaError, setSchemaError] = useState<string | null>(null);
+  const [showSchema, setShowSchema] = useState(false);
+  const schemaDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const schemaFetchedUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     setLocalRequest(request);
   }, [request]);
+
+  // Reset fetched schema only when switching to a genuinely different request,
+  // not on every keystroke (onRequestChange gives `request` a new identity per edit).
+  useEffect(() => {
+    setSchemaSummary(null);
+    setSchemaError(null);
+    setShowSchema(false);
+    schemaFetchedUrlRef.current = null;
+  }, [request?.id]);
 
   // Reset to body tab when switching to a different request
   useEffect(() => {
@@ -132,6 +151,89 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [rawBody, isJsonRaw]);
+
+  // Debounced JSON validation for the GraphQL variables editor
+  const isGraphqlBody = localRequest?.body?.type === 'graphql';
+  const graphqlVariablesText = isGraphqlBody ? (localRequest.body!.graphql?.variables || '') : '';
+  useEffect(() => {
+    if (graphqlVarsDebounceRef.current) clearTimeout(graphqlVarsDebounceRef.current);
+
+    if (!isGraphqlBody || !graphqlVariablesText || graphqlVariablesText.trim() === '') {
+      setGraphqlVariablesValidation(null);
+      return;
+    }
+
+    graphqlVarsDebounceRef.current = setTimeout(() => {
+      const sanitized = graphqlVariablesText.replace(/"?\{\{[\w.$]+\}\}"?/g, '"__placeholder__"');
+      try {
+        jsonlint.parse(sanitized);
+        setGraphqlVariablesValidation({ valid: true, message: 'Valid JSON' });
+      } catch (err: any) {
+        const msg = err.message || 'Invalid JSON';
+        setGraphqlVariablesValidation({ valid: false, message: msg.split('\n')[0] });
+      }
+    }, 300);
+
+    return () => {
+      if (graphqlVarsDebounceRef.current) clearTimeout(graphqlVarsDebounceRef.current);
+    };
+  }, [graphqlVariablesText, isGraphqlBody]);
+
+  const fetchGraphqlSchema = useCallback(async (url: string) => {
+    if (!url.trim()) return;
+    setSchemaLoading(true);
+    setSchemaError(null);
+    try {
+      const env: Environment = environment || { id: '', name: '', variables: {} };
+      const response = await HttpService.executeRequest(
+        {
+          id: '__introspection__',
+          name: 'Introspection',
+          method: 'POST',
+          url,
+          headers: { 'Content-Type': 'application/json' },
+          body: { type: 'raw', rawSubtype: 'json', data: JSON.stringify({ query: INTROSPECTION_QUERY }) },
+        },
+        env,
+        certificates,
+      );
+      const gqlErrors = extractIntrospectionErrors(response.data);
+      if (gqlErrors.length > 0) {
+        setSchemaError(gqlErrors[0]);
+        setSchemaSummary(null);
+      } else {
+        const summary = parseIntrospectionResult(response.data);
+        if (!summary) {
+          setSchemaError('This endpoint did not return a valid introspection result');
+          setSchemaSummary(null);
+        } else {
+          setSchemaSummary(summary);
+          setShowSchema(true);
+        }
+      }
+    } catch (err: any) {
+      setSchemaError(err?.message || 'Failed to fetch schema');
+    } finally {
+      setSchemaLoading(false);
+    }
+  }, [environment, certificates]);
+
+  // Schema introspection "on URL entry": auto-fetch once typing settles, while a
+  // GraphQL body is selected. Never re-fetches the same URL twice in a row.
+  useEffect(() => {
+    if (schemaDebounceRef.current) clearTimeout(schemaDebounceRef.current);
+    const url = localRequest?.url;
+    if (localRequest?.body?.type !== 'graphql' || !url?.trim() || schemaFetchedUrlRef.current === url) {
+      return;
+    }
+    schemaDebounceRef.current = setTimeout(() => {
+      schemaFetchedUrlRef.current = url;
+      fetchGraphqlSchema(url);
+    }, 800);
+    return () => {
+      if (schemaDebounceRef.current) clearTimeout(schemaDebounceRef.current);
+    };
+  }, [localRequest?.url, localRequest?.body?.type, fetchGraphqlSchema]);
 
   const renderHighlightedText = (text: string): React.ReactNode => {
     if (!searchTerm.trim()) return text;
@@ -501,7 +603,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                 className="form-input"
                 value={localRequest.body?.type || 'none'}
                 onChange={(e) => {
-                  const type = e.target.value as 'none' | 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'binary';
+                  const type = e.target.value as 'none' | 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'binary' | 'graphql';
                   if (type === 'none') {
                     updateRequest({ body: { type: 'none', data: '' } });
                   } else if (type === 'raw') {
@@ -521,6 +623,19 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                         binaryFilePath: localRequest.body?.type === 'binary' ? localRequest.body.binaryFilePath : undefined,
                       }
                     });
+                  } else if (type === 'graphql') {
+                    // GraphQL is always sent as a POST
+                    updateRequest({
+                      method: 'POST',
+                      body: {
+                        type: 'graphql',
+                        data: '',
+                        graphql: {
+                          query: localRequest.body?.type === 'graphql' ? localRequest.body.graphql?.query || '' : '',
+                          variables: localRequest.body?.type === 'graphql' ? localRequest.body.graphql?.variables || '' : '',
+                        },
+                      }
+                    });
                   } else {
                     updateRequest({
                       body: {
@@ -537,6 +652,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                 <option value="x-www-form-urlencoded">x-www-form-urlencoded</option>
                 <option value="form-data">form-data</option>
                 <option value="binary">Binary</option>
+                <option value="graphql">GraphQL</option>
               </select>
             </div>
             {localRequest.body?.type === 'raw' && (
@@ -690,6 +806,135 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
               onUpdateVariable={onUpdateVariable}
               allowSecrets={true}
             />
+          )}
+
+          {localRequest.body?.type === 'graphql' && (
+            <>
+              <div className="form-group">
+                <label>Query</label>
+                <VariableInput
+                  value={localRequest.body.graphql?.query || ''}
+                  onChange={(value) => updateRequest({
+                    body: {
+                      ...localRequest.body!,
+                      type: 'graphql',
+                      graphql: { ...localRequest.body!.graphql, query: value, variables: localRequest.body!.graphql?.variables || '' },
+                    }
+                  })}
+                  environment={environment}
+                  onUpdateVariable={onUpdateVariable}
+                  placeholder={'query {\n  posts {\n    id\n    title\n  }\n}'}
+                  className="form-textarea"
+                  style={{ minHeight: '160px', fontFamily: 'monospace' }}
+                  multiline={true}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Variables (JSON)</label>
+                <VariableInput
+                  value={localRequest.body.graphql?.variables || ''}
+                  onChange={(value) => updateRequest({
+                    body: {
+                      ...localRequest.body!,
+                      type: 'graphql',
+                      graphql: { ...localRequest.body!.graphql, query: localRequest.body!.graphql?.query || '', variables: value },
+                    }
+                  })}
+                  environment={environment}
+                  onUpdateVariable={onUpdateVariable}
+                  placeholder={'{\n  "id": "1"\n}'}
+                  className="form-textarea"
+                  style={{ minHeight: '100px', fontFamily: 'monospace' }}
+                  multiline={true}
+                />
+                {graphqlVariablesValidation && (
+                  <div style={{
+                    padding: '0.3rem 0.6rem',
+                    fontSize: '0.78rem',
+                    fontFamily: 'monospace',
+                    color: graphqlVariablesValidation.valid ? '#4ade80' : '#f87171',
+                    backgroundColor: graphqlVariablesValidation.valid ? 'rgba(74, 222, 128, 0.08)' : 'rgba(248, 113, 113, 0.08)',
+                    borderRadius: '0 0 4px 4px',
+                    marginTop: '-1px',
+                  }}>
+                    {graphqlVariablesValidation.valid ? '✓ ' : '✗ '}{graphqlVariablesValidation.message}
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={schemaLoading || !localRequest.url.trim()}
+                    onClick={() => {
+                      schemaFetchedUrlRef.current = localRequest.url;
+                      fetchGraphqlSchema(localRequest.url);
+                    }}
+                  >
+                    {schemaLoading ? 'Fetching schema…' : schemaSummary ? '🔄 Refresh Schema' : '🔍 Fetch Schema'}
+                  </button>
+                  {schemaSummary && (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => setShowSchema(v => !v)}
+                    >
+                      {showSchema ? 'Hide Schema' : 'Show Schema'}
+                    </button>
+                  )}
+                </div>
+
+                {schemaError && (
+                  <div style={{ color: '#f87171', fontSize: '0.82rem', marginTop: '0.5rem' }}>
+                    ⚠ {schemaError}
+                  </div>
+                )}
+
+                {schemaSummary && showSchema && (
+                  <div style={{
+                    marginTop: '0.5rem',
+                    border: '1px solid #333',
+                    borderRadius: 6,
+                    padding: '0.75rem',
+                    maxHeight: 260,
+                    overflowY: 'auto',
+                    fontSize: '0.82rem',
+                    fontFamily: 'monospace',
+                  }}>
+                    {schemaSummary.queries.length > 0 && (
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <div style={{ color: '#0d9e9e', fontWeight: 600, marginBottom: '0.25rem' }}>
+                          Queries ({schemaSummary.queries.length})
+                        </div>
+                        {schemaSummary.queries.map(f => (
+                          <div key={f.name} title={f.description} style={{ color: '#ccc', padding: '0.1rem 0' }}>
+                            {f.name}<span style={{ color: '#888' }}>{f.args}</span>: <span style={{ color: '#4ade80' }}>{f.returnType}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {schemaSummary.mutations.length > 0 && (
+                      <div>
+                        <div style={{ color: '#0d9e9e', fontWeight: 600, marginBottom: '0.25rem' }}>
+                          Mutations ({schemaSummary.mutations.length})
+                        </div>
+                        {schemaSummary.mutations.map(f => (
+                          <div key={f.name} title={f.description} style={{ color: '#ccc', padding: '0.1rem 0' }}>
+                            {f.name}<span style={{ color: '#888' }}>{f.args}</span>: <span style={{ color: '#4ade80' }}>{f.returnType}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {schemaSummary.queries.length === 0 && schemaSummary.mutations.length === 0 && (
+                      <div style={{ color: '#666', fontStyle: 'italic' }}>No queryable fields found</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}

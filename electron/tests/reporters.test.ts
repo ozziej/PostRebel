@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { formatJson, formatJUnit, formatText, CliRunResult } from '../reporters';
+import {
+  formatJson, formatJUnit, formatText, CliRunResult,
+  formatJsonDataDriven, formatJUnitDataDriven, formatTextDataDriven, CliDataRunResult,
+} from '../reporters';
 import { RunnerNode } from '../../src/types';
 
 function makeResult(overrides: Partial<CliRunResult> = {}): CliRunResult {
@@ -87,5 +90,62 @@ describe('formatJUnit', () => {
     const xml = formatJUnit(result, nodes);
     expect(xml).toContain('name="A &amp; B &lt;test&gt;"');
     expect(xml).toContain('&lt;bad&gt; &amp; &quot;quoted&quot;');
+  });
+});
+
+function makeDataResult(overrides: Partial<CliDataRunResult> = {}): CliDataRunResult {
+  return {
+    runner: { id: 'run1', name: 'Smoke Test' },
+    collection: { id: 'c1', name: 'Demo' },
+    environment: 'Local',
+    dataFile: 'rows.csv',
+    status: 'success',
+    rows: [
+      { ...makeResult({ status: 'success' }), rowIndex: 0, row: { userId: 'alice' } },
+      { ...makeResult({ status: 'success' }), rowIndex: 1, row: { userId: 'bob' } },
+    ],
+    ...overrides,
+  };
+}
+
+describe('formatJsonDataDriven', () => {
+  it('round-trips every row', () => {
+    const parsed = JSON.parse(formatJsonDataDriven(makeDataResult()));
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows[1].row).toEqual({ userId: 'bob' });
+  });
+});
+
+describe('formatTextDataDriven', () => {
+  it('prints a header and logs per row, then an overall summary', () => {
+    const text = formatTextDataDriven(makeDataResult());
+    expect(text).toContain('── Row 1/2: userId=alice ──');
+    expect(text).toContain('── Row 2/2: userId=bob ──');
+    expect(text).toContain('✓ Data-driven run: 2/2 row(s) passed');
+  });
+
+  it('reflects a failed row in both the row line and the overall summary', () => {
+    const result = makeDataResult({
+      status: 'error',
+      rows: [
+        { ...makeResult({ status: 'error' }), rowIndex: 0, row: { userId: 'alice' } },
+        { ...makeResult({ status: 'success' }), rowIndex: 1, row: { userId: 'bob' } },
+      ],
+    });
+    const text = formatTextDataDriven(result);
+    expect(text).toContain('✗ Row 1 error');
+    expect(text).toContain('✓ Row 2 success');
+    expect(text).toContain('✗ Data-driven run: 1/2 row(s) passed');
+  });
+});
+
+describe('formatJUnitDataDriven', () => {
+  it('emits one <testsuite> per row inside a <testsuites> root', () => {
+    const xml = formatJUnitDataDriven(makeDataResult(), NODES);
+    expect(xml).toContain('<testsuites>');
+    expect(xml).toContain('</testsuites>');
+    expect(xml).toContain('[row 1: userId=alice]');
+    expect(xml).toContain('[row 2: userId=bob]');
+    expect((xml.match(/<testsuite /g) || []).length).toBe(2);
   });
 });
