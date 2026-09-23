@@ -524,7 +524,19 @@ Paste an OpenAPI 3.x or Swagger 2.0 spec (JSON or YAML). PostRebel will:
 - If multiple named examples exist for an operation, create one request per example
 - Group operations by their first tag into **collection folders**; untagged operations go to the collection root
 
-You can import into an existing collection (folders will be merged in) or create a new one named after the spec title.
+You can import into an existing collection or create a new one named after the spec title.
+
+#### Drift check (re-importing into an existing collection)
+
+Importing into an existing collection no longer blindly duplicates everything. Endpoints are matched between the spec and the collection by **method + URL path** (ignoring host, since a spec's `servers` entry can change on its own) — request IDs are preserved across a re-import, so runner flows, saved responses, and history that reference a request keep working after it's updated.
+
+Before you click **Import**, a diff shows exactly what re-importing will do:
+- **Added** — a new method+path not currently in the collection.
+- **Changed** — same method+path, but auth type, headers, query params, body presence, content-type, or folder (tag) changed. Each shown as `field: before → after`.
+- **Removed** — a request currently in the collection whose method+path is no longer in the spec. **Kept by default** — nothing is ever silently deleted. Tick its checkbox to actually remove it on import.
+- **Unchanged** — counted, not listed.
+
+If nothing changed, importing is reported as a no-op rather than re-running the merge.
 
 ### Exporting
 
@@ -711,6 +723,7 @@ npm run dist         # Create distributable packages
 - ✅ **Headless CLI runner** - `postrebel run <collection> --workspace <name> [--env <name>] [--runner <name>] [--reporter text|json|junit] [--out <file>]` runs a saved Collection Runner flow from a terminal/CI job with no Electron/GUI process — see [Headless CLI Runner](#headless-cli-runner) below.
 - ✅ **Data-file-driven runs** - Run any Collection Runner flow once per row of an external CSV/JSON file, injecting that row's columns as `{{variables}}` (highest precedence, above the environment and Start-node overrides). Works both in the GUI (📄 **Data File** button on the runner toolbar; each row gets its own Run History entry tagged "Row N/M") and the CLI (`--data rows.csv`, with one JUnit `<testsuite>` or one row in the JSON/text report per row) — see [Headless CLI Runner](#headless-cli-runner) below.
 - ✅ **GraphQL request support** - A **GraphQL** body type with a Query editor and a separate Variables (JSON) editor, sent as `POST {query, variables}`; schema introspection fires automatically on URL entry, showing a Queries/Mutations field list. Round-trips through Postman import/export. See [GraphQL Requests](#graphql-requests) above. No autocomplete-in-editor yet — see the note there.
+- ✅ **OpenAPI drift check** - Re-importing a spec into an existing collection now diffs against it by method+path instead of blindly duplicating everything — shows added/changed/removed endpoints (with `field: before → after` detail for changes) before you commit, preserves request IDs across updates so runners/history/saved-responses stay valid, and never deletes a removed endpoint unless you explicitly tick it. See [Drift check](#drift-check-re-importing-into-an-existing-collection) above.
 
 🚧 **Planned:**
 - Workspace templates
@@ -722,8 +735,7 @@ npm run dist         # Create distributable packages
 
 **From a Bruno/Postman feature comparison, in priority order:**
 1. **OAuth2 auth type** (Authorization Code + PKCE, Client Credentials) - The biggest real-world auth gap. Needs an Electron-native redirect strategy (loopback `127.0.0.1` server + system browser, and/or a custom URI scheme) rather than depending on any hosted relay service.
-2. **OpenAPI drift check** - Re-importing a spec into an existing collection shows an added/removed/changed diff instead of blindly merging.
-3. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
+2. **MCP server integration** - Expose workspaces/collections/requests over MCP so an AI agent can list and run saved requests directly. Not shipped by either competitor yet.
 
 Explicitly out of scope as a result of the local-first principle: mock servers, monitors/scheduled runs, team SSO/SCIM, or any other feature that requires a hosted service.
 

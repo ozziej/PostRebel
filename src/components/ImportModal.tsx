@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Collection, Environment, ApiRequest } from '../types';
 import { importPostmanCollection, importPostmanEnvironment } from '../utils/postmanImporter';
 import { parseCurl } from '../utils/curlParser';
 import { importOpenApi } from '../utils/openApiImporter';
 import { countRequests } from '../utils/collectionTree';
+import { computeOpenApiDrift } from '../utils/openApiDrift';
 
 export type ImportTab = 'collection' | 'environment' | 'curl' | 'openapi';
 
@@ -15,7 +16,7 @@ interface ImportModalProps {
   onImportCollection: (collection: Collection, collectionVariables?: Environment) => void;
   onImportEnvironment: (environment: Environment) => void;
   onImportCurl: (request: ApiRequest, collectionId: string | null, newCollectionName?: string) => void;
-  onImportOpenApi: (collection: Collection, targetCollectionId: string | null, newCollectionName?: string) => void;
+  onImportOpenApi: (collection: Collection, targetCollectionId: string | null, newCollectionName?: string, removeKeys?: string[]) => void;
 }
 
 export const ImportModal: React.FC<ImportModalProps> = ({
@@ -40,6 +41,23 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [curlNewCollectionName, setCurlNewCollectionName] = useState('');
   const [openApiTargetCollection, setOpenApiTargetCollection] = useState('__new__');
   const [openApiNewCollectionName, setOpenApiNewCollectionName] = useState('');
+  const [openApiRemoveKeys, setOpenApiRemoveKeys] = useState<Set<string>>(new Set());
+
+  // Re-imports into an existing collection are diffed against it so re-running
+  // an import after the API changed shows what's added/removed/changed
+  // instead of blindly duplicating everything.
+  const openApiDrift = useMemo(() => {
+    if (activeTab !== 'openapi' || !preview?.collection || openApiTargetCollection === '__new__') return null;
+    const target = collections.find(c => c.id === openApiTargetCollection);
+    if (!target) return null;
+    return computeOpenApiDrift(target, preview.collection);
+  }, [activeTab, preview, openApiTargetCollection, collections]);
+
+  // Reset removal choices whenever the drift being reviewed changes, so a
+  // stale checkbox selection never carries over to a different target/spec.
+  useEffect(() => {
+    setOpenApiRemoveKeys(new Set());
+  }, [openApiDrift]);
 
   // Reset when tab changes
   const switchTab = (tab: ImportTab) => {
@@ -55,6 +73,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setCurlNewCollectionName('');
     setOpenApiTargetCollection('__new__');
     setOpenApiNewCollectionName('');
+    setOpenApiRemoveKeys(new Set());
   };
 
   // Reset when modal opens with a new tab
@@ -172,6 +191,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         importedCollection,
         openApiTargetCollection === '__new__' ? null : openApiTargetCollection,
         name,
+        Array.from(openApiRemoveKeys),
       );
       onClose();
     }
@@ -592,6 +612,83 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                       onChange={(e) => setOpenApiNewCollectionName(e.target.value)}
                       style={{ width: '100%', fontSize: '0.85rem' }}
                     />
+                  </div>
+                )}
+
+                {/* Drift check: re-importing into an existing collection is diffed
+                    against it, instead of blindly duplicating everything. */}
+                {openApiDrift && (
+                  <div style={{ marginTop: '1rem', borderTop: '1px solid #0d7377', paddingTop: '0.75rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '0.5rem' }}>
+                      Compared against the existing collection:{' '}
+                      <span style={{ color: '#4ade80' }}>{openApiDrift.added.length} added</span>,{' '}
+                      <span style={{ color: '#f59e0b' }}>{openApiDrift.changed.length} changed</span>,{' '}
+                      <span style={{ color: '#f87171' }}>{openApiDrift.removed.length} removed</span>,{' '}
+                      <span>{openApiDrift.unchangedCount} unchanged</span>
+                    </div>
+
+                    {openApiDrift.added.length === 0 && openApiDrift.changed.length === 0 && openApiDrift.removed.length === 0 && (
+                      <div style={{ fontSize: '0.8rem', color: '#4ade80', fontStyle: 'italic' }}>
+                        No changes detected — importing again is a no-op.
+                      </div>
+                    )}
+
+                    <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                      {openApiDrift.added.length > 0 && (
+                        <div style={{ marginBottom: '0.5rem' }}>
+                          <div style={{ fontSize: '0.78rem', color: '#4ade80', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                            + Added ({openApiDrift.added.length})
+                          </div>
+                          {openApiDrift.added.map(entry => (
+                            <div key={entry.key} style={{ fontSize: '0.78rem', color: '#ccc', padding: '0.1rem 0', fontFamily: 'monospace' }}>
+                              {entry.method} {entry.path}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {openApiDrift.changed.length > 0 && (
+                        <div style={{ marginBottom: '0.5rem' }}>
+                          <div style={{ fontSize: '0.78rem', color: '#f59e0b', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                            ~ Changed ({openApiDrift.changed.length})
+                          </div>
+                          {openApiDrift.changed.map(entry => (
+                            <div key={entry.key} style={{ fontSize: '0.78rem', color: '#ccc', padding: '0.15rem 0' }}>
+                              <span style={{ fontFamily: 'monospace' }}>{entry.method} {entry.path}</span>
+                              <div style={{ color: '#888' }}>
+                                {entry.changes!.map((c, i) => (
+                                  <div key={i} style={{ marginLeft: '1rem' }}>{c.field}: {c.before} → {c.after}</div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {openApiDrift.removed.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: '0.78rem', color: '#f87171', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                            − Removed from spec ({openApiDrift.removed.length}) — kept by default; tick to delete
+                          </div>
+                          {openApiDrift.removed.map(entry => (
+                            <label key={entry.key} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: '#ccc', padding: '0.1rem 0', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={openApiRemoveKeys.has(entry.key)}
+                                onChange={(e) => {
+                                  setOpenApiRemoveKeys(prev => {
+                                    const next = new Set(prev);
+                                    if (e.target.checked) next.add(entry.key); else next.delete(entry.key);
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <span style={{ fontFamily: 'monospace' }}>{entry.method} {entry.path}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

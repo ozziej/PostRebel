@@ -21,6 +21,7 @@ import { HttpService } from './utils/httpService';
 import { ScriptRunner } from './utils/scriptRunner';
 import { appendLogEntry } from './utils/consoleLog';
 import { collectionContainsRequest, findRequestById, removeRequestById, updateRequestById } from './utils/collectionTree';
+import { computeOpenApiDrift, applyOpenApiDrift } from './utils/openApiDrift';
 import './App.css';
 
 function App() {
@@ -551,15 +552,13 @@ function App() {
     importedCollection: Collection,
     targetCollectionId: string | null,
     newCollectionName?: string,
+    removeKeys?: string[],
   ) => {
     if (targetCollectionId) {
       const target = collections.find(c => c.id === targetCollectionId);
       if (target) {
-        const merged: Collection = {
-          ...target,
-          requests: [...target.requests, ...importedCollection.requests],
-          folders: [...(target.folders || []), ...(importedCollection.folders || [])],
-        };
+        const drift = computeOpenApiDrift(target, importedCollection);
+        const merged = applyOpenApiDrift(target, drift, new Set(removeKeys || []));
         await saveCollection(merged);
       }
     } else {
