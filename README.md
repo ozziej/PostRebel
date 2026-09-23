@@ -585,7 +585,7 @@ The body tab supports several content types:
 
 - **None** - No request body (shows an informational message).
 - **Raw** - Free-text body with a format sub-selector:
-  - **JSON** (default) - Includes live JSON validation/linting.
+  - **JSON** (default) - Includes live JSON validation/linting and a **{ } Format** button that pretty-prints in place.
   - **Text** - `text/plain`
   - **JavaScript** - `application/javascript`
   - **HTML** - `text/html`
@@ -601,11 +601,13 @@ The correct `Content-Type` header is set automatically based on your selection.
 
 Selecting **GraphQL** as the body type gives you:
 
-- **Query** — the GraphQL query/mutation text, with `{{variable}}` substitution like any other field.
-- **Variables (JSON)** — a separate JSON object sent alongside the query (`{"id": "{{userId}}"}`), with the same live JSON validation as a raw JSON body.
+- **Query** — the GraphQL query/mutation text, with `{{variable}}` substitution like any other field, and a **{ } Format** button that pretty-prints it (via the real `graphql` parser/printer, so it handles aliases, directives, fragments, etc. correctly — not a naive brace-indenter).
+- **Variables (JSON)** — a separate JSON object sent alongside the query (`{"id": "{{userId}}"}`), with the same live JSON validation and **{ } Format** button as a raw JSON body.
 - **Schema introspection on URL entry** — whenever the URL changes (typing pauses ~800ms) while GraphQL is selected, PostRebel automatically sends the standard introspection query to that endpoint and shows a **Queries** / **Mutations** list (name, arguments, return type) so you can see what's available without leaving the app. Click **🔍 Fetch Schema** / **🔄 Refresh Schema** to trigger it manually, or **Show/Hide Schema** to toggle the panel. This is a field-listing summary, not full autocomplete-in-editor — the query editor itself is a plain text field with no schema-aware suggestions yet.
 - An optional `operationName` is supported on the wire (for documents with multiple named operations) but has no dedicated UI field yet — set it via a script or a future update if you need it.
 - Postman's own `graphql` body mode round-trips through both the importer and exporter, so a Postman collection with GraphQL requests imports and exports correctly.
+
+**Format buttons preserve undo** — clicking **{ } Format** on any JSON or GraphQL field is a normal, undoable edit (`Cmd`/`Ctrl+Z` reverts it in one step), not a silent replace. `{{variable}}` placeholders (quoted or bare) are left exactly as written — only whitespace/indentation changes around them.
 
 ### Response Syntax Highlighting
 

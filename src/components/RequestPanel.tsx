@@ -716,6 +716,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                 className="form-textarea"
                 style={{ minHeight: '200px' }}
                 multiline={true}
+                format={isJsonRaw ? 'json' : undefined}
               />
               {jsonValidation && (
                 <div style={{
@@ -827,6 +828,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                   className="form-textarea"
                   style={{ minHeight: '160px', fontFamily: 'monospace' }}
                   multiline={true}
+                  format="graphql"
                 />
               </div>
 
@@ -847,6 +849,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
                   className="form-textarea"
                   style={{ minHeight: '100px', fontFamily: 'monospace' }}
                   multiline={true}
+                  format="json"
                 />
                 {graphqlVariablesValidation && (
                   <div style={{

@@ -1,6 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Environment } from '../types';
 import { DYNAMIC_VAR_NAMES_PRIMARY, DYNAMIC_VAR_NAMES_POSTMAN, resolveDynamicVariable } from '../utils/dynamicVariables';
+import { formatJsonText, formatGraphqlQuery } from '../utils/textFormat';
+import { replacePreservingUndo } from '../utils/undoSafeReplace';
 
 interface VariableInputProps {
   value: string;
@@ -12,6 +14,10 @@ interface VariableInputProps {
   style?: React.CSSProperties;
   multiline?: boolean;
   disabled?: boolean;
+  // Shows a "Format" button that pretty-prints the field in place, preserving
+  // native undo (Cmd/Ctrl+Z) via replacePreservingUndo rather than a plain
+  // React value replace.
+  format?: 'json' | 'graphql';
 }
 
 interface TooltipState {
@@ -39,9 +45,11 @@ export const VariableInput: React.FC<VariableInputProps> = ({
   className,
   style,
   multiline = false,
-  disabled = false
+  disabled = false,
+  format
 }) => {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [formatError, setFormatError] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [autocomplete, setAutocomplete] = useState<AutocompleteState | null>(null);
   const isHoveringTooltipRef = useRef(false);
@@ -412,12 +420,27 @@ export const VariableInput: React.FC<VariableInputProps> = ({
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const newValue = e.target.value;
     onChange(newValue);
+    setFormatError(null);
     const cursorPos = e.target.selectionStart ?? newValue.length;
     // Use rAF so the DOM value is updated before we measure
     requestAnimationFrame(() => {
       checkForAutocomplete(newValue, cursorPos);
     });
   }, [onChange, checkForAutocomplete]);
+
+  const handleFormat = useCallback(() => {
+    const el = inputRef.current;
+    if (!el || !format) return;
+    try {
+      const formatted = format === 'json' ? formatJsonText(value) : formatGraphqlQuery(value);
+      setFormatError(null);
+      if (formatted !== value) {
+        replacePreservingUndo(el as HTMLTextAreaElement, formatted);
+      }
+    } catch (err: any) {
+      setFormatError(err?.message?.split('\n')[0] || 'Could not format — fix syntax errors first');
+    }
+  }, [format, value]);
 
   const handleInputClick = useCallback(() => {
     const input = inputRef.current;
@@ -458,7 +481,47 @@ export const VariableInput: React.FC<VariableInputProps> = ({
         }}
       />
 
-      {multiline ? (
+      {multiline && format ? (
+        <div style={{ position: 'relative' }}>
+          <textarea {...commonProps} onKeyDown={handleTextareaKeyDown} />
+          <button
+            type="button"
+            onClick={handleFormat}
+            disabled={disabled}
+            title={`Format ${format === 'json' ? 'JSON' : 'GraphQL'} (Cmd/Ctrl+Z to undo)`}
+            style={{
+              position: 'absolute',
+              top: 6,
+              right: 6,
+              background: 'rgba(13, 115, 119, 0.85)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              borderRadius: 4,
+              color: '#fff',
+              fontSize: '0.72rem',
+              padding: '0.2rem 0.5rem',
+              cursor: 'pointer',
+            }}
+          >
+            {'{ }'} Format
+          </button>
+          {formatError && (
+            <div style={{
+              position: 'absolute',
+              top: 32,
+              right: 6,
+              maxWidth: '80%',
+              background: '#7f1d1d',
+              color: '#fff',
+              fontSize: '0.72rem',
+              padding: '0.2rem 0.5rem',
+              borderRadius: 4,
+              zIndex: 1,
+            }}>
+              {formatError}
+            </div>
+          )}
+        </div>
+      ) : multiline ? (
         <textarea {...commonProps} onKeyDown={handleTextareaKeyDown} />
       ) : (
         <input type="text" {...commonProps} onKeyDown={handleAutocompleteKeyDown} />
