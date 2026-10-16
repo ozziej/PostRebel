@@ -266,7 +266,9 @@ ipcMain.handle('get-settings', async () => {
 
 ipcMain.handle('update-settings', async (event, newSettings) => {
   try {
-    await saveSettings(newSettings);
+    // Merge so a settings save does not drop local keys such as workspaceTabs.
+    const settings = await getSettings();
+    await saveSettings({ ...settings, ...newSettings });
     return { success: true };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };

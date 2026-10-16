@@ -17,6 +17,20 @@ export function countRequests(container: FolderContainer): number {
   return container.requests.length + (container.folders || []).reduce((sum, f) => sum + countRequests(f), 0);
 }
 
+/**
+ * Folder ids from the outermost folder down to the folder that holds the request.
+ * An empty array means the request sits on the container itself.
+ * Undefined means the request is not in this container.
+ */
+export function findRequestFolderPath(container: FolderContainer, requestId: string): string[] | undefined {
+  if (container.requests.some(request => request.id === requestId)) return [];
+  for (const folder of container.folders || []) {
+    const nested = findRequestFolderPath(folder, requestId);
+    if (nested) return [folder.id, ...nested];
+  }
+  return undefined;
+}
+
 /** Finds a request by id anywhere in a container, at any depth. */
 export function findRequestById(container: FolderContainer, requestId: string): ApiRequest | undefined {
   const direct = container.requests.find(r => r.id === requestId);

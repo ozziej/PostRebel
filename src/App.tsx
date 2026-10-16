@@ -20,7 +20,9 @@ import { DEFAULT_SHORTCUTS, KeyboardShortcut, matchesShortcut } from './utils/ke
 import { HttpService } from './utils/httpService';
 import { ScriptRunner } from './utils/scriptRunner';
 import { appendLogEntry } from './utils/consoleLog';
-import { collectionContainsRequest, findRequestById, removeRequestById, updateRequestById } from './utils/collectionTree';
+import { collectionContainsRequest, findRequestById, flattenRequests, removeRequestById, updateRequestById } from './utils/collectionTree';
+import { MainTab, WorkspaceTabSnapshot, closeTab, openOrFocusTab, removeMatchingTabs, sanitizeWorkspaceTabs, tabKey, tabsStillPresent } from './utils/mainTabs';
+import { RequestWindowTabs, WindowTabItem } from './components/RequestWindowTabs';
 import { computeOpenApiDrift, applyOpenApiDrift } from './utils/openApiDrift';
 import './App.css';
 
@@ -32,9 +34,12 @@ function App() {
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [activeEnvironment, setActiveEnvironment] = useState<Environment | null>(null);
   const [activeRequest, setActiveRequest] = useState<ApiRequest | null>(null);
+  const [openTabs, setOpenTabs] = useState<MainTab[]>([]);
+  const [activeTabKey, setActiveTabKey] = useState<string | null>(null);
   const [currentResponse, setCurrentResponse] = useState<ApiResponse | null>(null);
   const [responseCache, setResponseCache] = useState<Record<string, ApiResponse>>({});
-  const [isLoading, setIsLoading] = useState(false);
+  const [loadingRequestId, setLoadingRequestId] = useState<string | null>(null);
+  const [testResultsByRequest, setTestResultsByRequest] = useState<Record<string, Array<{ name: string; passed: boolean; error?: string }>>>({});
   // Persistent, app-wide console log — accumulates across every ad-hoc
   // request sent this session (not reset per-request), like a DevTools console.
   const [consoleLog, setConsoleLog] = useState<RunnerLogEntry[]>([]);
@@ -69,6 +74,19 @@ function App() {
   const [totalMatchCount, setTotalMatchCount] = useState(0);
   const [shortcuts, setShortcuts] = useState<KeyboardShortcut[]>(DEFAULT_SHORTCUTS);
   const savedPrefsRef = useRef<{ activeWorkspaceId?: string; activeEnvironmentId?: string }>({});
+  // Open tabs live in Electron userData (settings.json), not in the workspace git repo.
+  const workspaceTabsRef = useRef<Record<string, WorkspaceTabSnapshot>>({});
+  const tabsReadyRef = useRef(false);
+  const activeWorkspaceIdRef = useRef<string | null>(null);
+  const showMainTabRef = useRef<(tab: MainTab | null, overrides?: { request?: ApiRequest; runner?: Runner }) => void>(() => {});
+  const activeRequestIdRef = useRef<string | null>(null);
+  const viewingSavedRef = useRef(false);
+  const activeRunnerIdRef = useRef<string | null>(null);
+  const loadingRequestIdRef = useRef<string | null>(null);
+  activeWorkspaceIdRef.current = activeWorkspace?.id ?? null;
+  activeRequestIdRef.current = activeRequest?.id ?? null;
+  viewingSavedRef.current = activeSavedResponse !== null;
+  activeRunnerIdRef.current = activeRunner?.id ?? null;
 
   useEffect(() => {
     // Load saved preferences then workspaces
@@ -92,6 +110,7 @@ function App() {
             activeWorkspaceId: s.activeWorkspaceId,
             activeEnvironmentId: s.activeEnvironmentId,
           };
+          workspaceTabsRef.current = sanitizeWorkspaceTabs(s.workspaceTabs);
         }
       } catch (error) {
         console.error('Error loading preferences:', error);
@@ -107,6 +126,21 @@ function App() {
     }
   }, [activeWorkspace]);
 
+  useEffect(() => {
+    if (!tabsReadyRef.current || !activeWorkspace) return;
+    const snapshot: WorkspaceTabSnapshot = { tabs: openTabs, activeKey: activeTabKey };
+    const current = workspaceTabsRef.current[activeWorkspace.id];
+    if (
+      current &&
+      current.activeKey === snapshot.activeKey &&
+      JSON.stringify(current.tabs) === JSON.stringify(snapshot.tabs)
+    ) {
+      return;
+    }
+    const next = { ...workspaceTabsRef.current, [activeWorkspace.id]: snapshot };
+    workspaceTabsRef.current = next;
+    window.electronAPI.savePreference('workspaceTabs', next);
+  }, [openTabs, activeTabKey, activeWorkspace]);
 
   const loadWorkspaces = async () => {
     try {
@@ -128,13 +162,22 @@ function App() {
   };
 
   const loadData = async () => {
+    const workspaceId = activeWorkspace?.id;
     try {
-      const workspaceId = activeWorkspace?.id;
       const collectionsResult = await window.electronAPI.loadCollections(workspaceId);
       const environmentsResult = await window.electronAPI.loadEnvironments(workspaceId);
+      const certificatesResult = window.electronAPI.loadCertificates
+        ? await window.electronAPI.loadCertificates()
+        : null;
+      const historyResult = workspaceId ? await window.electronAPI.loadHistory(workspaceId) : null;
+      const savedResult = workspaceId ? await window.electronAPI.loadSavedResponses(workspaceId) : null;
+      const runnersResult = workspaceId ? await window.electronAPI.loadRunners(workspaceId) : null;
 
+      if (activeWorkspaceIdRef.current !== (workspaceId ?? null)) return;
+
+      const loadedCollections: Collection[] = collectionsResult.success ? collectionsResult.collections : [];
       if (collectionsResult.success) {
-        setCollections(collectionsResult.collections);
+        setCollections(loadedCollections);
       }
 
       if (environmentsResult.success) {
@@ -148,41 +191,36 @@ function App() {
         }
       }
 
-      // Load certificates if available
-      if (window.electronAPI.loadCertificates) {
-        const certificatesResult = await window.electronAPI.loadCertificates();
-        if (certificatesResult.success) {
-          setCertificates(certificatesResult.certificates);
-        }
+      if (certificatesResult?.success) {
+        setCertificates(certificatesResult.certificates);
       }
 
-      // Load history
-      if (activeWorkspace) {
-        const historyResult = await window.electronAPI.loadHistory(activeWorkspace.id);
-        if (historyResult.success && historyResult.entries) {
-          setRequestHistory(historyResult.entries);
-        } else {
-          setRequestHistory([]);
-        }
-      }
+      if (workspaceId) {
+        setRequestHistory(historyResult?.success && historyResult.entries ? historyResult.entries : []);
+        setSavedResponses(savedResult?.success && savedResult.entries ? savedResult.entries : []);
+        const loadedRunners: Runner[] = runnersResult?.success ? (runnersResult.runners || []) : [];
+        setRunners(loadedRunners);
 
-      // Load saved responses
-      if (activeWorkspace) {
-        const savedResult = await window.electronAPI.loadSavedResponses(activeWorkspace.id);
-        if (savedResult.success && savedResult.entries) {
-          setSavedResponses(savedResult.entries);
-        } else {
-          setSavedResponses([]);
-        }
-      }
-
-      // Load runners
-      if (activeWorkspace) {
-        const runnersResult = await window.electronAPI.loadRunners(activeWorkspace.id);
-        if (runnersResult.success) {
-          setRunners(runnersResult.runners || []);
-        } else {
-          setRunners([]);
+        if (collectionsResult.success && runnersResult?.success) {
+          const requestIds = new Set(loadedCollections.flatMap(collection => flattenRequests(collection).map(request => request.id)));
+          const runnerIds = new Set(loadedRunners.map(runner => runner.id));
+          const savedTabs = workspaceTabsRef.current[workspaceId];
+          const tabs = tabsStillPresent(savedTabs?.tabs || [], requestIds, runnerIds);
+          const active = tabs.find(tab => tabKey(tab) === savedTabs?.activeKey) ?? tabs[tabs.length - 1] ?? null;
+          setOpenTabs(tabs);
+          tabsReadyRef.current = true;
+          if (active?.kind === 'request') {
+            let request: ApiRequest | undefined;
+            for (const collection of loadedCollections) {
+              request = findRequestById(collection, active.id);
+              if (request) break;
+            }
+            showMainTabRef.current(active, { request });
+          } else if (active?.kind === 'runner') {
+            showMainTabRef.current(active, { runner: loadedRunners.find(runner => runner.id === active.id) });
+          } else {
+            showMainTabRef.current(null);
+          }
         }
       }
     } catch (error) {
@@ -238,6 +276,17 @@ function App() {
     if (collection) {
       const workspaceId = activeWorkspace?.id;
       await window.electronAPI.deleteCollection(workspaceId, collection.name);
+      const requestIds = new Set(flattenRequests(collection).map(request => request.id));
+      const runnerIds = new Set(runners.filter(runner => runner.collectionId === collectionId).map(runner => runner.id));
+      const removed = removeMatchingTabs(openTabs, activeTabKey, tab =>
+        (tab.kind === 'request' && requestIds.has(tab.id)) ||
+        (tab.kind === 'runner' && runnerIds.has(tab.id))
+      );
+      setOpenTabs(removed.tabs);
+      const savedWasRemoved = !!activeSavedResponse && requestIds.has(activeSavedResponse.requestId);
+      if (removed.activeRemoved || savedWasRemoved) {
+        showMainTab(removed.active);
+      }
     }
     return { success: true };
   };
@@ -251,6 +300,22 @@ function App() {
     const collection = collections.find(c => c.id === collectionId);
     if (collection) {
       await saveCollection(removeRequestById(collection, requestId));
+    }
+
+    const closing: MainTab = { kind: 'request', id: requestId };
+    const closed = closeTab(openTabs, closing);
+    if (closed.tabs.length !== openTabs.length) {
+      setOpenTabs(closed.tabs);
+    }
+    const wasActive = activeTabKey === tabKey(closing);
+    const savedWasThis = activeSavedResponse?.requestId === requestId;
+    if (wasActive || savedWasThis) {
+      if (wasActive) {
+        showMainTab(closed.neighbor);
+      } else if (savedWasThis) {
+        const current = openTabs.find(tab => tabKey(tab) === activeTabKey) ?? null;
+        showMainTab(current);
+      }
     }
 
     return { success: true };
@@ -364,17 +429,29 @@ function App() {
   };
 
   const handleSelectWorkspace = async (workspace: Workspace) => {
+    if (activeWorkspace && activeWorkspace.id !== workspace.id) {
+      const snapshot: WorkspaceTabSnapshot = { tabs: openTabs, activeKey: activeTabKey };
+      workspaceTabsRef.current = { ...workspaceTabsRef.current, [activeWorkspace.id]: snapshot };
+      window.electronAPI.savePreference('workspaceTabs', workspaceTabsRef.current);
+    }
+    tabsReadyRef.current = false;
     setActiveWorkspace(workspace);
     await window.electronAPI.setActiveWorkspace(workspace.id);
     window.electronAPI.savePreference('activeWorkspaceId', workspace.id);
     console.log('[App] Switched to workspace:', workspace.name);
-    // Clear current data
+    // Clear current data. The next load restores this workspace's saved tabs.
     setCollections([]);
     setEnvironments([]);
     setActiveEnvironment(null);
     setActiveRequest(null);
+    setOpenTabs([]);
+    setActiveTabKey(null);
     setCurrentResponse(null);
     setResponseCache({});
+    setTestResults([]);
+    setTestResultsByRequest({});
+    setLoadingRequestId(null);
+    loadingRequestIdRef.current = null;
     setRequestHistory([]);
     setSavedResponses([]);
     setActiveSavedResponse(null);
@@ -572,24 +649,79 @@ function App() {
     console.log('[App] Imported OpenAPI collection:', importedCollection.name);
   };
 
-  const handleSelectRequest = (request: ApiRequest) => {
+  const findOpenRequest = (requestId: string): ApiRequest | undefined => {
+    for (const collection of collections) {
+      const found = findRequestById(collection, requestId);
+      if (found) return found;
+    }
+    return undefined;
+  };
+
+  const showMainTab = (tab: MainTab | null, overrides?: { request?: ApiRequest; runner?: Runner }) => {
+    setActiveTabKey(tab ? tabKey(tab) : null);
     setActiveSavedResponse(null);
+    if (!tab) {
+      setActiveRequest(null);
+      setActiveRunner(null);
+      setCurrentResponse(null);
+      setTestResults([]);
+      return;
+    }
+    if (tab.kind === 'runner') {
+      const runner = overrides?.runner ?? runners.find(item => item.id === tab.id) ?? null;
+      setActiveRequest(null);
+      setActiveRunner(runner);
+      setCurrentResponse(null);
+      setTestResults([]);
+      return;
+    }
+    const request = overrides?.request ?? findOpenRequest(tab.id) ?? null;
     setActiveRunner(null);
     setActiveRequest(request);
-    setCurrentResponse(responseCache[request.id] ?? null);
+    setCurrentResponse(request ? (responseCache[request.id] ?? null) : null);
+    setTestResults(request ? (testResultsByRequest[request.id] ?? []) : []);
+  };
+
+  showMainTabRef.current = showMainTab;
+
+  const openMainTab = (tab: MainTab, overrides?: { request?: ApiRequest; runner?: Runner }) => {
+    setOpenTabs(prev => openOrFocusTab(prev, tab));
+    showMainTab(tab, overrides);
+  };
+
+  const handleSelectWindowTab = (key: string) => {
+    const tab = openTabs.find(item => tabKey(item) === key);
+    if (tab) showMainTab(tab);
+  };
+
+  const handleCloseWindowTab = (key: string) => {
+    const tab = openTabs.find(item => tabKey(item) === key);
+    if (!tab) return;
+    const closed = closeTab(openTabs, tab);
+    setOpenTabs(closed.tabs);
+    if (activeTabKey !== key) return;
+    if (activeSavedResponse) {
+      setActiveTabKey(closed.neighbor ? tabKey(closed.neighbor) : null);
+      if (!closed.neighbor) showMainTab(null);
+      return;
+    }
+    showMainTab(closed.neighbor);
+  };
+
+  const handleSelectRequest = (request: ApiRequest) => {
+    openMainTab({ kind: 'request', id: request.id }, { request });
   };
 
   const handleSelectSavedResponse = (saved: SavedResponse) => {
     setActiveSavedResponse(saved);
     setActiveRequest(saved.request);
+    setActiveRunner(null);
     setCurrentResponse(saved.response);
+    setTestResults([]);
   };
 
   const handleSelectRunner = (runner: Runner) => {
-    setActiveRunner(runner);
-    setActiveRequest(null);
-    setActiveSavedResponse(null);
-    setCurrentResponse(null);
+    openMainTab({ kind: 'runner', id: runner.id }, { runner });
   };
 
   const handleSaveRunner = async (runner: Runner) => {
@@ -625,10 +757,7 @@ function App() {
     const copy: Runner = { ...runner, id: Date.now().toString(), name: `${runner.name} (copy)`, createdAt: now, updatedAt: now };
     await window.electronAPI.saveRunner(activeWorkspace.id, copy);
     setRunners(prev => [...prev, copy]);
-    setActiveRunner(copy);
-    setActiveRequest(null);
-    setActiveSavedResponse(null);
-    setCurrentResponse(null);
+    openMainTab({ kind: 'runner', id: copy.id }, { runner: copy });
   };
 
   const handleDeleteRunner = async (runnerId: string) => {
@@ -636,8 +765,12 @@ function App() {
     if (!confirm('Are you sure you want to delete this runner?')) return;
     await window.electronAPI.deleteRunner(activeWorkspace.id, runnerId);
     setRunners(prev => prev.filter(r => r.id !== runnerId));
-    if (activeRunner?.id === runnerId) {
-      setActiveRunner(null);
+    const closed = closeTab(openTabs, { kind: 'runner', id: runnerId });
+    if (closed.tabs.length !== openTabs.length) {
+      setOpenTabs(closed.tabs);
+      if (activeTabKey === tabKey({ kind: 'runner', id: runnerId })) {
+        showMainTab(closed.neighbor);
+      }
     }
   };
 
@@ -661,15 +794,13 @@ function App() {
     };
     await window.electronAPI.saveRunner(activeWorkspace.id, newRunner);
     setRunners(prev => [...prev, newRunner]);
-    setActiveRunner(newRunner);
-    setActiveRequest(null);
-    setActiveSavedResponse(null);
-    setCurrentResponse(null);
+    openMainTab({ kind: 'runner', id: newRunner.id }, { runner: newRunner });
   };
 
   const handleShowRunnerResponse = (response: ApiResponse, request: ApiRequest) => {
+    setResponseCache(prev => ({ ...prev, [request.id]: response }));
+    openMainTab({ kind: 'request', id: request.id }, { request });
     setCurrentResponse(response);
-    setActiveRequest(request);
   };
 
   const handleSaveSavedResponse = async (name: string) => {
@@ -710,9 +841,20 @@ function App() {
       return;
     }
 
-    setIsLoading(true);
-    setCurrentResponse(null);
-    setTestResults([]);
+    if (loadingRequestIdRef.current) return;
+
+    const showingThisRequest = () =>
+      activeRequestIdRef.current === request.id &&
+      !viewingSavedRef.current &&
+      !activeRunnerIdRef.current;
+
+    loadingRequestIdRef.current = request.id;
+    setLoadingRequestId(request.id);
+    setTestResultsByRequest(prev => ({ ...prev, [request.id]: [] }));
+    if (showingThisRequest()) {
+      setCurrentResponse(null);
+      setTestResults([]);
+    }
 
     try {
       const activeCollection = collections.find(c => collectionContainsRequest(c, request.id)) || null;
@@ -741,8 +883,8 @@ function App() {
         response.status === 0 ? 'error' : ok ? 'success' : 'warn',
         `← ${response.status} ${response.statusText} (${response.time}ms)`
       );
-      setCurrentResponse(response);
       setResponseCache(prev => ({ ...prev, [request.id]: response }));
+      if (showingThisRequest()) setCurrentResponse(response);
 
       // Log history entry
       if (activeWorkspace) {
@@ -778,7 +920,12 @@ function App() {
           appendConsoleLog('error', `Test script error: ${testScriptResult.error}`);
         }
 
-        setTestResults(testScriptResult.testResults || []);
+        const results = testScriptResult.testResults || [];
+        setTestResultsByRequest(prev => ({ ...prev, [request.id]: results }));
+        if (showingThisRequest()) setTestResults(results);
+      } else {
+        setTestResultsByRequest(prev => ({ ...prev, [request.id]: [] }));
+        if (showingThisRequest()) setTestResults([]);
       }
 
     } catch (error: any) {
@@ -798,8 +945,12 @@ function App() {
         time: 0,
         size: 0
       };
-      setCurrentResponse(errorResponse);
       setResponseCache(prev => ({ ...prev, [request.id]: errorResponse }));
+      setTestResultsByRequest(prev => ({ ...prev, [request.id]: [] }));
+      if (showingThisRequest()) {
+        setCurrentResponse(errorResponse);
+        setTestResults([]);
+      }
 
       // Log error to history
       if (activeWorkspace && activeEnvironment) {
@@ -821,7 +972,10 @@ function App() {
         setRequestHistory(prev => [entry, ...prev]);
       }
     } finally {
-      setIsLoading(false);
+      if (loadingRequestIdRef.current === request.id) {
+        loadingRequestIdRef.current = null;
+        setLoadingRequestId(null);
+      }
     }
   };
 
@@ -846,7 +1000,7 @@ function App() {
 
       // Send request shortcut (only when there's an active request and not loading)
       if (sendShortcut && matchesShortcut(e, sendShortcut.currentKey)) {
-        if (activeRequest && !isLoading && activeEnvironment) {
+        if (activeRequest && !loadingRequestId && activeEnvironment) {
           e.preventDefault();
           executeRequest(activeRequest);
           return;
@@ -856,7 +1010,7 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [shortcuts, activeRequest, isLoading, activeEnvironment, executeRequest]);
+  }, [shortcuts, activeRequest, loadingRequestId, activeEnvironment, executeRequest]);
 
   return (
     <div className="app">
@@ -913,6 +1067,26 @@ function App() {
         </ResizableSidebar>
 
         <div className="main-content">
+        <RequestWindowTabs
+          tabs={openTabs.map((tab): WindowTabItem => {
+            if (tab.kind === 'runner') {
+              const runner = runners.find(item => item.id === tab.id);
+              return { key: tabKey(tab), kind: 'runner', title: runner?.name || 'Runner' };
+            }
+            const request = findOpenRequest(tab.id);
+            return {
+              key: tabKey(tab),
+              kind: 'request',
+              method: request?.method,
+              title: request?.name || 'Request',
+              loading: loadingRequestId === tab.id,
+            };
+          })}
+          activeKey={activeTabKey}
+          suppressActive={activeSavedResponse !== null}
+          onSelect={handleSelectWindowTab}
+          onClose={handleCloseWindowTab}
+        />
         <RequestPanel
           request={activeRequest}
           environment={activeEnvironment}
@@ -920,7 +1094,8 @@ function App() {
           onExecute={executeRequest}
           onRequestChange={handleRequestChange}
           onUpdateVariable={handleUpdateVariable}
-          isLoading={isLoading}
+          isLoading={!!activeRequest && loadingRequestId === activeRequest.id && !activeRunner}
+          sendDisabled={loadingRequestId !== null}
           requestHistory={requestHistory}
           isReadOnly={activeSavedResponse !== null}
           searchTerm={searchTerm}
@@ -938,7 +1113,7 @@ function App() {
             response={currentResponse}
             logs={consoleLog}
             onClearConsole={() => setConsoleLog([])}
-            isLoading={isLoading}
+            isLoading={!!activeRequest && loadingRequestId === activeRequest.id && !activeSavedResponse}
             activeSavedResponse={activeSavedResponse}
             onSaveResponse={handleSaveSavedResponse}
             searchTerm={searchTerm}

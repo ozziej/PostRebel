@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Collection, Environment, ApiRequest, Workspace, SavedResponse, CollectionFolder, Runner } from '../types';
 import { exportPostmanCollection } from '../utils/postmanExporter';
 import { exportOpenApi } from '../utils/openApiExporter';
 import { downloadTextFile } from '../utils/download';
-import { countRequests, findFolderById, updateFolderById, removeFolderById, addFolder, updateRequestById } from '../utils/collectionTree';
+import { countRequests, findFolderById, findRequestFolderPath, updateFolderById, removeFolderById, addFolder, updateRequestById } from '../utils/collectionTree';
 
 function safeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'collection';
@@ -172,6 +172,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
   const [expandedRequests, setExpandedRequests] = useState<Set<string>>(new Set());
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const scrolledSidebarKey = useRef<string | null>(null);
+  const selectedSidebarKey = activeRequest
+    ? `request:${activeRequest.id}`
+    : activeRunner
+      ? `runner:${activeRunner.id}`
+      : null;
+
+  // Open the collection and folders that hold the selected request or runner
+  // so the highlight is on screen.
+  useEffect(() => {
+    if (activeRequest) {
+      for (const collection of collections) {
+        const path = findRequestFolderPath(collection, activeRequest.id);
+        if (!path) continue;
+        setExpandedCollections(prev => prev.has(collection.id) ? prev : new Set([...prev, collection.id]));
+        if (path.length > 0) {
+          setExpandedFolders(prev => path.every(id => prev.has(id)) ? prev : new Set([...prev, ...path]));
+        }
+        return;
+      }
+    } else if (activeRunner) {
+      setExpandedCollections(prev =>
+        prev.has(activeRunner.collectionId) ? prev : new Set([...prev, activeRunner.collectionId])
+      );
+    }
+  }, [activeRequest?.id, activeRunner?.id, activeRunner?.collectionId, collections]);
+
+  useLayoutEffect(() => {
+    if (!selectedSidebarKey || scrolledSidebarKey.current === selectedSidebarKey) return;
+    const element = document.querySelector(`[data-sidebar-item="${CSS.escape(selectedSidebarKey)}"]`);
+    if (!element) return;
+    element.scrollIntoView({ block: 'nearest' });
+    scrolledSidebarKey.current = selectedSidebarKey;
+  }, [selectedSidebarKey, expandedCollections, expandedFolders]);
   const [showNewCollection, setShowNewCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [newFolderTarget, setNewFolderTarget] = useState<{ collectionId: string; parentFolderId: string | null } | null>(null);
@@ -632,12 +666,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const reqSavedResponses = savedResponses.filter(s => s.requestId === request.id);
     const isReqExpanded = expandedRequests.has(request.id);
     const isReqDragging = dragItem?.id === request.id;
+    const isSelectedRequest = activeRequest?.id === request.id && !activeRunner;
     const handleIndent = depth === 0 ? 4 : 24 + (depth - 1) * 16; // px — matches the previous 1-level indent (1.5rem ≈ 24px) and scales with depth
 
     return (
       <div key={request.id}>
         <div
-          className="request-item"
+          className={`request-item${isSelectedRequest ? ' active' : ''}`}
+          data-sidebar-item={`request:${request.id}`}
           draggable={editingRequest !== request.id}
           onDragStart={(e) => handleDragStart(e, 'request', request.id, collection.id, folderId)}
           onDragEnd={handleDragEnd}
@@ -648,12 +684,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             padding: '0.5rem 0.75rem 0.5rem 0.25rem',
             cursor: editingRequest !== request.id ? 'grab' : 'default',
             opacity: isReqDragging ? 0.4 : 1,
-            backgroundColor: activeRequest?.id === request.id ? '#0d737720' : 'transparent',
+            backgroundColor: isSelectedRequest ? '#0d7377' : 'transparent',
+            color: isSelectedRequest ? '#ffffff' : undefined,
           }}
           onClick={() => { if (editingRequest !== request.id) onSelectRequest(request); }}
         >
           {editingRequest !== request.id && (
-            <span style={{ color: '#555', fontSize: '0.85rem', padding: `0 4px 0 ${handleIndent}px`, flexShrink: 0, userSelect: 'none', pointerEvents: 'none' }}>⠿</span>
+            <span style={{ color: isSelectedRequest ? '#d9f5f4' : '#555', fontSize: '0.85rem', padding: `0 4px 0 ${handleIndent}px`, flexShrink: 0, userSelect: 'none', pointerEvents: 'none' }}>⠿</span>
           )}
           {editingRequest === request.id ? (
             <>
@@ -683,7 +720,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 )}
                 <span className={`http-method ${request.method}`}>{request.method}</span>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{request.name}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.8rem', fontWeight: isSelectedRequest ? 600 : 400 }}>{request.name}</span>
               </div>
               <div style={{ position: 'relative' }}>
                 <button onClick={(e) => openMenu(e, `req-${request.id}`)} className="button-secondary button" style={{ fontSize: '0.8rem', padding: '0.15rem 0.4rem', letterSpacing: '0.05em' }} title="More actions">···</button>
@@ -1113,16 +1150,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {collection.requests.map((request, reqIndex) => renderRequestRow(collection, request, reqIndex, null, 0))}
 
                 {/* Runners for this collection */}
-                {runners.filter(r => r.collectionId === collection.id).map(runner => (
+                {runners.filter(r => r.collectionId === collection.id).map(runner => {
+                  const isSelectedRunner = activeRunner?.id === runner.id;
+                  return (
                   <div
                     key={runner.id}
+                    data-sidebar-item={`runner:${runner.id}`}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       padding: '0.5rem 0.75rem 0.5rem 0.5rem',
                       cursor: 'pointer',
-                      backgroundColor: activeRunner?.id === runner.id ? '#0d737720' : 'transparent',
+                      backgroundColor: isSelectedRunner ? '#0d7377' : 'transparent',
+                      color: isSelectedRunner ? '#ffffff' : undefined,
                       borderTop: '1px solid #333',
                     }}
                     onClick={() => { if (editingRunner !== runner.id) onSelectRunner(runner); }}
@@ -1159,7 +1200,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           autoFocus
                         />
                       ) : (
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.82rem', color: activeRunner?.id === runner.id ? '#0d9e9e' : '#e0e0e0' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.82rem', color: isSelectedRunner ? '#ffffff' : '#e0e0e0', fontWeight: isSelectedRunner ? 600 : 400 }}>
                           {runner.name}
                         </span>
                       )}
@@ -1187,7 +1228,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

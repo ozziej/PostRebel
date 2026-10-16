@@ -48,6 +48,8 @@ interface RequestPanelProps {
   onRequestChange: (request: ApiRequest) => void;
   onUpdateVariable?: (varName: string, newValue: string) => void;
   isLoading: boolean;
+  /** Another request is already in flight, so Send stays disabled without showing this tab as sending. */
+  sendDisabled?: boolean;
   requestHistory?: RequestHistoryEntry[];
   isReadOnly?: boolean;
   searchTerm?: string;
@@ -68,6 +70,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
   onRequestChange,
   onUpdateVariable,
   isLoading,
+  sendDisabled = false,
   requestHistory = [],
   isReadOnly = false,
   searchTerm = '',
@@ -340,7 +343,7 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({
         <button
           className="send-button"
           onClick={() => onExecute(localRequest)}
-          disabled={isLoading || !environment}
+          disabled={isLoading || sendDisabled || !environment}
         >
           {isLoading ? '...' : 'Send'}
         </button>

@@ -1,6 +1,6 @@
 {
   "name": "postrebel",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "description": "Local API testing tool with git support",
   "author": "James Ostrowick <james@ostrowick.co.za>",
   "main": "dist/electron/main.js",
@@ -85,5 +85,8 @@
     "react-dom": "^19.2.6",
     "simple-git": "^3.36.0",
     "zod": "^4.6.5"
+  },
+  "allowScripts": {
+    "fsevents@2.3.3": true
   }
 }

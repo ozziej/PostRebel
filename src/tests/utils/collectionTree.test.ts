@@ -3,6 +3,7 @@ import {
   flattenRequests,
   countRequests,
   findRequestById,
+  findRequestFolderPath,
   findFolderById,
   mapAllRequests,
   updateRequestById,
@@ -44,6 +45,20 @@ describe('countRequests', () => {
 
   it('counts zero for an empty container', () => {
     expect(countRequests({ requests: [] })).toBe(0);
+  });
+});
+
+describe('findRequestFolderPath', () => {
+  it('returns an empty path for a root request', () => {
+    expect(findRequestFolderPath(makeNestedCollection(), 'r1')).toEqual([]);
+  });
+
+  it('returns each ancestor folder for a nested request', () => {
+    expect(findRequestFolderPath(makeNestedCollection(), 'r4')).toEqual(['A', 'B']);
+  });
+
+  it('returns undefined when the request is absent', () => {
+    expect(findRequestFolderPath(makeNestedCollection(), 'missing')).toBeUndefined();
   });
 });
 
