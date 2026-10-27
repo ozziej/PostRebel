@@ -38,6 +38,19 @@ export function tabsStillPresent(
   return tabs.filter(tab => tab.kind === 'request' ? requestIds.has(tab.id) : runnerIds.has(tab.id));
 }
 
+// Moves the tab with `fromKey` so it sits where the tab with `toKey` was.
+// Returns the same array when either key is missing or both keys match.
+export function moveTab(tabs: MainTab[], fromKey: string, toKey: string): MainTab[] {
+  if (fromKey === toKey) return tabs;
+  const from = tabs.findIndex(tab => tabKey(tab) === fromKey);
+  const to = tabs.findIndex(tab => tabKey(tab) === toKey);
+  if (from === -1 || to === -1) return tabs;
+  const next = [...tabs];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
 export function tabKey(tab: MainTab): string {
   return `${tab.kind}:${tab.id}`;
 }

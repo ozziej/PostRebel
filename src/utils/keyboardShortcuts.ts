@@ -33,12 +33,12 @@ export const DEFAULT_SHORTCUTS: KeyboardShortcut[] = [
     category: 'request'
   },
   {
-    id: 'save-response',
-    name: 'Save Response',
-    description: 'Save the current response',
-    defaultKey: 'cmd+s',
-    currentKey: 'cmd+s',
-    category: 'request'
+    id: 'new-window',
+    name: 'New Window',
+    description: 'Open a new window with its own workspace',
+    defaultKey: 'cmd+shift+n',
+    currentKey: 'cmd+shift+n',
+    category: 'general'
   }
 ];
 

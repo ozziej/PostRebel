@@ -1,8 +1,31 @@
 import { describe, it, expect } from 'vitest';
-import { MainTab, closeTab, openOrFocusTab, removeMatchingTabs, sanitizeWorkspaceTabs, tabKey, tabsStillPresent } from '../../utils/mainTabs';
+import { MainTab, closeTab, moveTab, openOrFocusTab, removeMatchingTabs, sanitizeWorkspaceTabs, tabKey, tabsStillPresent } from '../../utils/mainTabs';
 
 const request = (id: string): MainTab => ({ kind: 'request', id });
 const runner = (id: string): MainTab => ({ kind: 'runner', id });
+
+describe('moveTab', () => {
+  const keys = (tabs: MainTab[]) => tabs.map(tabKey);
+  const tabs = [request('a'), request('b'), request('c')];
+
+  it('moves a tab forward to the target position', () => {
+    expect(keys(moveTab(tabs, 'request:a', 'request:c'))).toEqual(['request:b', 'request:c', 'request:a']);
+  });
+
+  it('moves a tab backward to the target position', () => {
+    expect(keys(moveTab(tabs, 'request:c', 'request:a'))).toEqual(['request:c', 'request:a', 'request:b']);
+  });
+
+  it('returns the same array when nothing moves', () => {
+    expect(moveTab(tabs, 'request:b', 'request:b')).toBe(tabs);
+    expect(moveTab(tabs, 'request:x', 'request:b')).toBe(tabs);
+  });
+
+  it('does not mutate the input', () => {
+    moveTab(tabs, 'request:a', 'request:c');
+    expect(keys(tabs)).toEqual(['request:a', 'request:b', 'request:c']);
+  });
+});
 
 describe('openOrFocusTab', () => {
   it('appends a request tab that is not open', () => {

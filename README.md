@@ -25,6 +25,8 @@ A local API testing tool with git support - your Postman alternative.
 - **Response syntax highlighting** - JSON and XML responses are colour-coded with distinct colours for keys, string values, numbers, booleans, tag names, and attributes
 - **Drag and drop** - Reorder requests and folders in the sidebar by dragging; drag requests between folders to move them
 - **Workspace management** - Organize projects into separate workspaces with a shared git repo at the workspaces root directory; export (⬇️) any workspace as a single portable bundle file and import it back in from the Workspace Manager
+- **Multiple windows** - Open a new window with **🗗 New Window** or `Cmd+Shift+N` / `Ctrl+Shift+N`; each window is an independent session with its own workspace, so you can test across two workspaces side by side without switching. A workspace can be open in only one window at a time — selecting it in another window focuses that window instead
+- **Request tabs** - Requests and runners open as tabs across the top of the window; drag tabs to reorder them. Each workspace remembers its own open tabs
 - **Copy request to workspace** — right-click any request (`···` menu → Copy to Workspace) to copy it and its referenced `{{variables}}` to another workspace in one step
 - **Secrets management** - Mark variables and form parameters as secret; secrets are automatically split into `.secrets.json` files and gitignored; secret variable values are masked as `••••••••` in runner execution logs and CSV exports
 - **Local secret scanner** - A ⚠️ warning appears next to any header, environment variable, or form-data value that looks like a real secret (AWS/GitHub/Slack/Stripe/Google tokens, PEM blocks, JWTs, hardcoded Bearer tokens, or a suspiciously-named field) but isn't marked as secret
@@ -93,8 +95,8 @@ PostRebel includes configurable keyboard shortcuts for faster workflow.
 
 - **Send Request**: `Cmd+Enter` (Mac) / `Ctrl+Enter` (Windows/Linux)
 - **Open Search**: `Cmd+F` (Mac) / `Ctrl+F` (Windows/Linux)
-- **New Request**: `Cmd+N` (Mac) / `Ctrl+N` (Windows/Linux) *(planned)*
-- **Save Response**: `Cmd+S` (Mac) / `Ctrl+S` (Windows/Linux) *(planned)*
+- **New Window**: `Cmd+Shift+N` (Mac) / `Ctrl+Shift+N` (Windows/Linux)
+- **New Request**: `Cmd+N` (Mac) / `Ctrl+N` (Windows/Linux) — adds a request to the open request's collection (or the first collection) and opens it in rename mode
 
 ### Customizing Shortcuts
 
@@ -622,7 +624,20 @@ Reorder and organise requests and folders by dragging items in the sidebar.
 
 - **Reorder requests** within a folder (at any depth) or at the collection root by dragging them up and down.
 - **Move requests between folders** — including into or out of nested sub-folders — by dragging a request onto a different folder.
+- **Reorder request tabs** across the top of the window by dragging a tab onto another tab (see [Multiple Windows and Request Tabs](#multiple-windows-and-request-tabs)).
 - **Reorder folders** at the collection root by dragging the folder header. Nested folders can be created/renamed/deleted at any depth, but reordering a nested folder among its siblings isn't supported via drag yet — only top-level folders can be dragged to reorder.
+
+### Multiple Windows and Request Tabs
+
+Each PostRebel window is a separate session with its own workspace, open requests, and tabs.
+
+- **Open a window** with **🗗 New Window** in the top bar, or `Cmd+Shift+N` / `Ctrl+Shift+N`. The new window opens on the first workspace that isn't already open in another window.
+- **One workspace per window.** Switching a window to a workspace that another window already shows does not open a second copy; that window is focused instead.
+- **Window titles** show the workspace name (`PostRebel — Travel`), so windows are easy to tell apart.
+- **Window position** is remembered from the window you last focused. New windows open slightly offset from it so they don't stack exactly on top of each other.
+- **Request tabs** open when you select a request or runner. Close a tab with **×** or a middle-click.
+- **Reorder tabs** by dragging a tab onto another tab. The dragged tab takes the position of the tab you drop it on.
+- **Per-workspace tabs.** Each workspace remembers its own open tabs and the active tab, so switching workspaces restores where you left off. Tab order is saved with them.
 
 ### Request Body Types
 
@@ -759,6 +774,8 @@ npm run dist         # Create distributable packages
     - ✅ **Code generation** - `</> Code` button generates cURL, JavaScript fetch, and Python `requests` snippets with variables and auth resolved
 - ✅ **Collection Runner** - Visual flow-based runner: Request / Retry / Set Variable / Debug / Delay / For Each nodes, JavaScript conditions, dot-notation variable access, data mappings, edge output expressions, execution log, run history panel, Start-node variable overrides, inline request+response inspection
 - ✅ **Collection export (Postman v2, OpenAPI)** - Export any collection from its **···** menu in the sidebar as a Postman v2.1 collection JSON or an OpenAPI 3.0 spec; auth, headers, bodies, folders (as tags), and `{{variable}}` placeholders (as path/query params) are converted back to each format's native shape
+- ✅ **Multiple windows** - **🗗 New Window** button and `Cmd+Shift+N` / `Ctrl+Shift+N` open an independent window per workspace; a workspace can only be open in one window at a time, and window titles show the workspace name
+- ✅ **Request tab reordering** - Drag request and runner tabs along the top of the window to reorder them; order is saved per workspace
 - ✅ **Import/export workspaces** - Export (⬇️) any workspace from the **Workspace Manager** as a single `.postrebel_workspace.json` bundle containing its collections, environments (with secret values), runners, runner history, request history, and saved responses; **Import** the file back in to recreate the whole workspace, ready to switch to immediately
 - ✅ **Local secret scanner** - Header, environment variable, and form-data param values are checked against known secret formats (AWS keys, GitHub/Slack/Stripe tokens, PEM blocks, JWTs, hardcoded Bearer tokens) and suspicious key names (`*token*`, `*secret*`, `*api_key*`, `*password*`, ...); a ⚠️ warning icon appears next to any match that isn't marked `isSecret` (headers have no secret-marking mechanism at all, so any match there is always flagged)
 - ✅ **Expanded `pm` script API** - `pm.sendRequest(urlOrRequestObject, callback)` fires an HTTP request from a pre-request/test script (e.g. to fetch a fresh token) and waits for the callback before the script is considered finished; `pm.collectionVariables.get/set` reads and writes a `Collection`-scoped variable bag; `pm.globals.get/set` reads and writes an in-memory, app-session-scoped variable bag shared by every script execution. `pm.globals` remains in-memory only (cleared on restart).

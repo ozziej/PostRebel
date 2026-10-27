@@ -3,7 +3,7 @@ import { Collection, Environment, ApiRequest, Workspace, SavedResponse, Collecti
 import { exportPostmanCollection } from '../utils/postmanExporter';
 import { exportOpenApi } from '../utils/openApiExporter';
 import { downloadTextFile } from '../utils/download';
-import { countRequests, findFolderById, findRequestFolderPath, updateFolderById, removeFolderById, addFolder, updateRequestById } from '../utils/collectionTree';
+import { countRequests, findFolderById, findRequestFolderPath, findRequestById, updateFolderById, removeFolderById, addFolder, updateRequestById } from '../utils/collectionTree';
 
 function safeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'collection';
@@ -67,6 +67,10 @@ interface SidebarProps {
   onDeleteSavedResponse: (id: string) => void;
   onRenameSavedResponse: (id: string, newName: string) => void;
   onSaveCollection: (collection: Collection) => Promise<any>;
+  onAddRequest: (collection: Collection) => Promise<void>;
+  /** A request just created elsewhere (e.g. Cmd+N) that should open straight into rename mode. */
+  pendingRenameRequestId: string | null;
+  onPendingRenameHandled: () => void;
   onDeleteCollection: (collectionId: string) => Promise<any>;
   onDeleteRequest: (collectionId: string, requestId: string) => Promise<any>;
   onEditCollectionAuth: (collection: Collection) => void;
@@ -105,6 +109,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteSavedResponse,
   onRenameSavedResponse,
   onSaveCollection,
+  onAddRequest,
+  pendingRenameRequestId,
+  onPendingRenameHandled,
   onDeleteCollection,
   onDeleteRequest,
   onEditCollectionAuth,
@@ -268,26 +275,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const addRequestToCollection = async (collection: Collection) => {
-    const newRequest: ApiRequest = {
-      id: Date.now().toString(),
-      name: 'New Request',
-      method: 'GET',
-      url: 'https://api.example.com',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      // Set inherit as default if collection has auth configured
-      auth: collection.auth ? { type: 'inherit' } : undefined
-    };
-
-    const updatedCollection = {
-      ...collection,
-      requests: [...collection.requests, newRequest]
-    };
-
-    await onSaveCollection(updatedCollection);
-    onSelectRequest(newRequest);
+    await onAddRequest(collection);
   };
+
+  // Opens a newly created request in rename mode once it appears in the tree.
+  useEffect(() => {
+    if (!pendingRenameRequestId) return;
+    for (const collection of collections) {
+      const request = findRequestById(collection, pendingRenameRequestId);
+      if (request) {
+        setExpandedCollections(prev => new Set([...prev, collection.id]));
+        startEditingRequest(request);
+        onPendingRenameHandled();
+        return;
+      }
+    }
+  }, [pendingRenameRequestId, collections]);
 
   const createFolder = async (collection: Collection, parentFolderId: string | null) => {
     if (!newFolderName.trim()) return;

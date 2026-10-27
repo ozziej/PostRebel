@@ -21,7 +21,7 @@ import { HttpService } from './utils/httpService';
 import { ScriptRunner } from './utils/scriptRunner';
 import { appendLogEntry } from './utils/consoleLog';
 import { collectionContainsRequest, findRequestById, flattenRequests, removeRequestById, updateRequestById } from './utils/collectionTree';
-import { MainTab, WorkspaceTabSnapshot, closeTab, openOrFocusTab, removeMatchingTabs, sanitizeWorkspaceTabs, tabKey, tabsStillPresent } from './utils/mainTabs';
+import { MainTab, WorkspaceTabSnapshot, closeTab, moveTab, openOrFocusTab, removeMatchingTabs, sanitizeWorkspaceTabs, tabKey, tabsStillPresent } from './utils/mainTabs';
 import { RequestWindowTabs, WindowTabItem } from './components/RequestWindowTabs';
 import { computeOpenApiDrift, applyOpenApiDrift } from './utils/openApiDrift';
 import './App.css';
@@ -78,6 +78,8 @@ function App() {
   const workspaceTabsRef = useRef<Record<string, WorkspaceTabSnapshot>>({});
   const tabsReadyRef = useRef(false);
   const activeWorkspaceIdRef = useRef<string | null>(null);
+  // Which workspace this window was opened with, and which other windows already show.
+  const windowContextRef = useRef<{ workspaceId: string | null; openWorkspaceIds: string[] }>({ workspaceId: null, openWorkspaceIds: [] });
   const showMainTabRef = useRef<(tab: MainTab | null, overrides?: { request?: ApiRequest; runner?: Runner }) => void>(() => {});
   const activeRequestIdRef = useRef<string | null>(null);
   const viewingSavedRef = useRef(false);
@@ -91,6 +93,14 @@ function App() {
   useEffect(() => {
     // Load saved preferences then workspaces
     const init = async () => {
+      try {
+        const context = await window.electronAPI.getWindowContext();
+        if (context.success) {
+          windowContextRef.current = { workspaceId: context.workspaceId, openWorkspaceIds: context.openWorkspaceIds };
+        }
+      } catch (error) {
+        console.error('Error loading window context:', error);
+      }
       try {
         const result = await window.electronAPI.getSettings();
         if (result.success && result.settings) {
@@ -126,6 +136,11 @@ function App() {
     }
   }, [activeWorkspace]);
 
+  // The window title follows the workspace, so two windows can be told apart.
+  useEffect(() => {
+    document.title = activeWorkspace ? `PostRebel — ${activeWorkspace.name}` : 'PostRebel';
+  }, [activeWorkspace]);
+
   useEffect(() => {
     if (!tabsReadyRef.current || !activeWorkspace) return;
     const snapshot: WorkspaceTabSnapshot = { tabs: openTabs, activeKey: activeTabKey };
@@ -139,7 +154,7 @@ function App() {
     }
     const next = { ...workspaceTabsRef.current, [activeWorkspace.id]: snapshot };
     workspaceTabsRef.current = next;
-    window.electronAPI.savePreference('workspaceTabs', next);
+    window.electronAPI.saveWorkspaceTabs(activeWorkspace.id, snapshot);
   }, [openTabs, activeTabKey, activeWorkspace]);
 
   const loadWorkspaces = async () => {
@@ -147,13 +162,17 @@ function App() {
       const result = await window.electronAPI.loadWorkspaces();
       if (result.success) {
         setWorkspaces(result.workspaces);
-        // Auto-select saved workspace, or first workspace if available
+        // Auto-select this window's workspace, else the saved one, else the first one not open in another window
         if (result.workspaces.length > 0 && !activeWorkspace) {
-          const savedId = savedPrefsRef.current.activeWorkspaceId;
-          const savedWorkspace = savedId
-            ? result.workspaces.find((w: Workspace) => w.id === savedId)
-            : undefined;
-          setActiveWorkspace(savedWorkspace || result.workspaces[0]);
+          const { workspaceId: windowWorkspaceId, openWorkspaceIds } = windowContextRef.current;
+          const preferredId = windowWorkspaceId ?? savedPrefsRef.current.activeWorkspaceId;
+          const isFree = (w: Workspace) => !openWorkspaceIds.includes(w.id);
+          const initial = result.workspaces.find((w: Workspace) => w.id === preferredId && isFree(w))
+            ?? result.workspaces.find(isFree);
+          if (initial) {
+            const registered = await window.electronAPI.setActiveWorkspace(initial.id);
+            if (registered.success) setActiveWorkspace(initial);
+          }
         }
       }
     } catch (error) {
@@ -429,15 +448,28 @@ function App() {
   };
 
   const handleSelectWorkspace = async (workspace: Workspace) => {
+    // The main process refuses a workspace that another window already shows, and focuses that window instead.
+    const registered = await window.electronAPI.setActiveWorkspace(workspace.id);
+    if (!registered.success) {
+      console.log('[App] Workspace is open in another window:', workspace.name);
+      return;
+    }
     if (activeWorkspace && activeWorkspace.id !== workspace.id) {
       const snapshot: WorkspaceTabSnapshot = { tabs: openTabs, activeKey: activeTabKey };
       workspaceTabsRef.current = { ...workspaceTabsRef.current, [activeWorkspace.id]: snapshot };
-      window.electronAPI.savePreference('workspaceTabs', workspaceTabsRef.current);
+      window.electronAPI.saveWorkspaceTabs(activeWorkspace.id, snapshot);
+    }
+    // Other windows may have saved this workspace's tabs since this window loaded settings.
+    const fresh = await window.electronAPI.getSettings();
+    if (fresh.success && fresh.settings) {
+      const storedTabs = sanitizeWorkspaceTabs(fresh.settings.workspaceTabs)[workspace.id];
+      const next = { ...workspaceTabsRef.current };
+      if (storedTabs) next[workspace.id] = storedTabs;
+      else delete next[workspace.id];
+      workspaceTabsRef.current = next;
     }
     tabsReadyRef.current = false;
     setActiveWorkspace(workspace);
-    await window.electronAPI.setActiveWorkspace(workspace.id);
-    window.electronAPI.savePreference('activeWorkspaceId', workspace.id);
     console.log('[App] Switched to workspace:', workspace.name);
     // Clear current data. The next load restores this workspace's saved tabs.
     setCollections([]);
@@ -708,6 +740,8 @@ function App() {
     showMainTab(closed.neighbor);
   };
 
+  const [pendingRenameRequestId, setPendingRenameRequestId] = useState<string | null>(null);
+
   const handleSelectRequest = (request: ApiRequest) => {
     openMainTab({ kind: 'request', id: request.id }, { request });
   };
@@ -718,6 +752,24 @@ function App() {
     setActiveRunner(null);
     setCurrentResponse(saved.response);
     setTestResults([]);
+  };
+
+  // Creates a request at the root of `collection` and opens it with its name ready to edit.
+  const createRequest = async (collection: Collection) => {
+    const newRequest: ApiRequest = {
+      id: Date.now().toString(),
+      name: 'New Request',
+      method: 'GET',
+      url: 'https://api.example.com',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      // Set inherit as default if collection has auth configured
+      auth: collection.auth ? { type: 'inherit' } : undefined
+    };
+    await saveCollection({ ...collection, requests: [...collection.requests, newRequest] });
+    setPendingRenameRequestId(newRequest.id);
+    handleSelectRequest(newRequest);
   };
 
   const handleSelectRunner = (runner: Runner) => {
@@ -990,6 +1042,26 @@ function App() {
 
       const searchShortcut = shortcuts.find(s => s.id === 'open-search');
       const sendShortcut = shortcuts.find(s => s.id === 'send-request');
+      const newWindowShortcut = shortcuts.find(s => s.id === 'new-window');
+      const newRequestShortcut = shortcuts.find(s => s.id === 'new-request');
+
+      // New window shortcut
+      if (newWindowShortcut && matchesShortcut(e, newWindowShortcut.currentKey)) {
+        e.preventDefault();
+        window.electronAPI.openNewWindow(null);
+        return;
+      }
+
+      // New request shortcut: adds to the collection of the open request, else the first collection
+      if (newRequestShortcut && matchesShortcut(e, newRequestShortcut.currentKey)) {
+        const target = (activeRequest && collections.find(c => collectionContainsRequest(c, activeRequest.id)))
+          || collections[0];
+        if (target) {
+          e.preventDefault();
+          createRequest(target);
+        }
+        return;
+      }
 
       // Open search shortcut
       if (searchShortcut && matchesShortcut(e, searchShortcut.currentKey)) {
@@ -1010,7 +1082,7 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [shortcuts, activeRequest, loadingRequestId, activeEnvironment, executeRequest]);
+  }, [shortcuts, activeRequest, loadingRequestId, activeEnvironment, executeRequest, collections, createRequest]);
 
   return (
     <div className="app">
@@ -1022,6 +1094,7 @@ function App() {
         onSelectWorkspace={handleSelectWorkspace}
         onSelectEnvironment={handleSelectEnvironment}
         onOpenWorkspaceManager={() => setShowWorkspaceManager(true)}
+        onOpenNewWindow={() => window.electronAPI.openNewWindow(null)}
         onOpenEnvironmentManager={() => setShowEnvManager(true)}
         onOpenCertManager={() => setShowCertManager(true)}
         onOpenImport={() => openImportModal('collection')}
@@ -1053,6 +1126,9 @@ function App() {
             onDeleteSavedResponse={handleDeleteSavedResponse}
             onRenameSavedResponse={handleRenameSavedResponse}
             onSaveCollection={saveCollection}
+            onAddRequest={createRequest}
+            pendingRenameRequestId={pendingRenameRequestId}
+            onPendingRenameHandled={() => setPendingRenameRequestId(null)}
             onDeleteCollection={deleteCollection}
             onDeleteRequest={deleteRequest}
             onEditCollectionAuth={handleEditCollectionAuth}
@@ -1068,6 +1144,7 @@ function App() {
 
         <div className="main-content">
         <RequestWindowTabs
+          onMove={(fromKey, toKey) => setOpenTabs(prev => moveTab(prev, fromKey, toKey))}
           tabs={openTabs.map((tab): WindowTabItem => {
             if (tab.kind === 'runner') {
               const runner = runners.find(item => item.id === tab.id);

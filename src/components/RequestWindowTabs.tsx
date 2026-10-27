@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 export interface WindowTabItem {
   key: string;
@@ -15,6 +15,8 @@ interface RequestWindowTabsProps {
   suppressActive?: boolean;
   onSelect: (key: string) => void;
   onClose: (key: string) => void;
+  /** Called when a tab is dropped on another tab; `toKey` is the tab it was dropped on. */
+  onMove: (fromKey: string, toKey: string) => void;
 }
 
 export const RequestWindowTabs: React.FC<RequestWindowTabsProps> = ({
@@ -23,20 +25,55 @@ export const RequestWindowTabs: React.FC<RequestWindowTabsProps> = ({
   suppressActive = false,
   onSelect,
   onClose,
+  onMove,
 }) => {
+  const [draggedKey, setDraggedKey] = useState<string | null>(null);
+  const [dropKey, setDropKey] = useState<string | null>(null);
+
   if (tabs.length === 0) return null;
+
+  const clearDrag = () => {
+    setDraggedKey(null);
+    setDropKey(null);
+  };
 
   return (
     <div className="window-tabs" role="tablist" aria-label="Open requests and runners">
       {tabs.map(tab => {
         const selected = !suppressActive && tab.key === activeKey;
+        const classes = ['window-tab'];
+        if (selected) classes.push('active');
+        if (tab.key === draggedKey) classes.push('dragging');
+        if (tab.key === dropKey && draggedKey !== null && draggedKey !== tab.key) classes.push('drop-target');
         return (
           <div
             key={tab.key}
             role="tab"
             aria-selected={selected}
-            className={`window-tab${selected ? ' active' : ''}`}
+            className={classes.join(' ')}
             title={tab.title}
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('text/plain', tab.key);
+              setDraggedKey(tab.key);
+            }}
+            onDragOver={(event) => {
+              if (draggedKey === null) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+              if (dropKey !== tab.key) setDropKey(tab.key);
+            }}
+            onDragLeave={() => {
+              if (dropKey === tab.key) setDropKey(null);
+            }}
+            onDrop={(event) => {
+              if (draggedKey === null) return;
+              event.preventDefault();
+              if (draggedKey !== tab.key) onMove(draggedKey, tab.key);
+              clearDrag();
+            }}
+            onDragEnd={clearDrag}
             onClick={() => onSelect(tab.key)}
             onAuxClick={(event) => {
               if (event.button === 1) {

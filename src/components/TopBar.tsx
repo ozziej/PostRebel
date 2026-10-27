@@ -9,6 +9,7 @@ interface TopBarProps {
   onSelectWorkspace: (workspace: Workspace) => void;
   onSelectEnvironment: (environment: Environment) => void;
   onOpenWorkspaceManager: () => void;
+  onOpenNewWindow: () => void;
   onOpenEnvironmentManager: () => void;
   onOpenCertManager: () => void;
   onOpenImport: () => void;
@@ -23,6 +24,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onSelectWorkspace,
   onSelectEnvironment,
   onOpenWorkspaceManager,
+  onOpenNewWindow,
   onOpenEnvironmentManager,
   onOpenCertManager,
   onOpenImport,
@@ -161,6 +163,18 @@ export const TopBar: React.FC<TopBarProps> = ({
         display: 'flex',
         gap: '0.5rem'
       }}>
+        <button
+          onClick={onOpenNewWindow}
+          className="button"
+          style={{
+            padding: '0.5rem 0.75rem',
+            fontSize: '0.9rem',
+            whiteSpace: 'nowrap'
+          }}
+          title="Open a new window with its own workspace (Cmd+Shift+N)"
+        >
+          🗗 New Window
+        </button>
         <button
           onClick={onOpenImport}
           className="button-secondary button"

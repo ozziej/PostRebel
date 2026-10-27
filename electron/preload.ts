@@ -5,6 +5,8 @@ export interface ElectronAPI {
   createWorkspace: (name: string, description?: string) => Promise<any>;
   loadWorkspaces: () => Promise<any>;
   setActiveWorkspace: (workspaceId: string) => Promise<any>;
+  getWindowContext: () => Promise<any>;
+  openNewWindow: (workspaceId?: string | null) => Promise<any>;
   updateWorkspace: (workspaceId: string, name: string, description?: string) => Promise<any>;
   deleteWorkspace: (workspaceId: string) => Promise<any>;
   exportWorkspace: (workspaceId: string) => Promise<any>;
@@ -36,6 +38,7 @@ export interface ElectronAPI {
   getSettings: () => Promise<any>;
   updateSettings: (settings: any) => Promise<any>;
   savePreference: (key: string, value: any) => Promise<any>;
+  saveWorkspaceTabs: (workspaceId: string, snapshot: any) => Promise<any>;
   chooseWorkspaceDirectory: () => Promise<any>;
 
   // Import
@@ -67,6 +70,8 @@ const api: ElectronAPI = {
   createWorkspace: (name, description) => ipcRenderer.invoke('create-workspace', name, description),
   loadWorkspaces: () => ipcRenderer.invoke('load-workspaces'),
   setActiveWorkspace: (workspaceId) => ipcRenderer.invoke('set-active-workspace', workspaceId),
+  getWindowContext: () => ipcRenderer.invoke('get-window-context'),
+  openNewWindow: (workspaceId) => ipcRenderer.invoke('open-new-window', workspaceId),
   updateWorkspace: (workspaceId, name, description) => ipcRenderer.invoke('update-workspace', workspaceId, name, description),
   deleteWorkspace: (workspaceId) => ipcRenderer.invoke('delete-workspace', workspaceId),
   exportWorkspace: (workspaceId) => ipcRenderer.invoke('export-workspace', workspaceId),
@@ -98,6 +103,7 @@ const api: ElectronAPI = {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   updateSettings: (settings) => ipcRenderer.invoke('update-settings', settings),
   savePreference: (key, value) => ipcRenderer.invoke('save-preference', key, value),
+  saveWorkspaceTabs: (workspaceId, snapshot) => ipcRenderer.invoke('save-workspace-tabs', workspaceId, snapshot),
   chooseWorkspaceDirectory: () => ipcRenderer.invoke('choose-workspace-directory'),
 
   // Import

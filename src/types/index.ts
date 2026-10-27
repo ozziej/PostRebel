@@ -231,7 +231,9 @@ declare global {
       // Workspace management
       createWorkspace: (name: string, description?: string) => Promise<{ success: boolean; workspace?: Workspace; error?: string }>;
       loadWorkspaces: () => Promise<{ success: boolean; workspaces: Workspace[] }>;
-      setActiveWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>;
+      setActiveWorkspace: (workspaceId: string) => Promise<{ success: boolean; alreadyOpen?: boolean; error?: string }>;
+      getWindowContext: () => Promise<{ success: boolean; windowId: number | null; workspaceId: string | null; openWorkspaceIds: string[] }>;
+      openNewWindow: (workspaceId?: string | null) => Promise<{ success: boolean; focused?: boolean; error?: string }>;
       updateWorkspace: (workspaceId: string, name: string, description?: string) => Promise<{ success: boolean; workspace?: Workspace; error?: string }>;
       deleteWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>;
       exportWorkspace: (workspaceId: string) => Promise<{ success: boolean; data?: string; error?: string }>;
@@ -263,6 +265,7 @@ declare global {
       getSettings: () => Promise<{ success: boolean; settings?: any; error?: string }>;
       updateSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
       savePreference: (key: string, value: any) => Promise<{ success: boolean; error?: string }>;
+      saveWorkspaceTabs: (workspaceId: string, snapshot: unknown) => Promise<{ success: boolean; error?: string }>;
       chooseWorkspaceDirectory: () => Promise<{ success: boolean; directory?: string; error?: string }>;
 
       // Import

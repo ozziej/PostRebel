@@ -51,6 +51,14 @@
   user-select: none;
 }
 
+.window-tab.dragging {
+  opacity: 0.4;
+}
+
+.window-tab.drop-target {
+  box-shadow: inset 2px 0 0 #0d7377;
+}
+
 .window-tab:hover {
   background: #222;
   color: #eee;

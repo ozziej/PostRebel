@@ -5,8 +5,13 @@ import { simpleGit } from 'simple-git';
 import * as os from 'os';
 import { splitSecrets } from '../src/utils/secretSplitter';
 import { executeHttpConfig } from './httpTransport';
+import { createSerialQueue, WindowRegistry } from './windowState';
 
-let mainWindow: BrowserWindow;
+// Every open window, keyed by BrowserWindow id, with the workspace it shows.
+const windows = new WindowRegistry<BrowserWindow>();
+
+// Serializes settings.json read-modify-write cycles so windows cannot overwrite each other's preferences.
+const settingsQueue = createSerialQueue();
 
 function getWindowIconPath(): string {
   const iconFile = 'Post Rebel App Logo.png';
@@ -41,6 +46,24 @@ async function saveSettings(settings: any): Promise<void> {
   cachedSettings = settings;
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
   await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+}
+
+async function mutateSettings(mutate: (settings: any) => void): Promise<void> {
+  await settingsQueue(async () => {
+    const settings = await getSettings();
+    mutate(settings);
+    await saveSettings(settings);
+  });
+}
+
+function windowIdFor(event: Electron.IpcMainInvokeEvent): number | undefined {
+  return BrowserWindow.fromWebContents(event.sender)?.id;
+}
+
+// Native open dialogs attach to the window that asked for them.
+function showOpenDialogFor(event: Electron.IpcMainInvokeEvent, options: Electron.OpenDialogOptions) {
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  return parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options);
 }
 
 async function getWorkspacesBaseDir(): Promise<string> {
@@ -91,9 +114,15 @@ async function saveEnvironmentData(workspaceId: string | undefined, data: any): 
   return filePath;
 }
 
-const createWindow = async () => {
+// Each window is its own session: its own renderer state and its own workspace.
+// A null workspace means the renderer picks one (last used, or the first not open elsewhere).
+const WINDOW_CASCADE_OFFSET = 30;
+
+const createWindow = async (workspaceId: string | null = null) => {
   const settings = await getSettings();
   const wb = settings.windowBounds;
+  // Offset each new window so it does not sit exactly on top of the others.
+  const cascade = windows.size * WINDOW_CASCADE_OFFSET;
 
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: wb?.width || 1200,
@@ -108,89 +137,112 @@ const createWindow = async () => {
 
   // Only set position if we have saved bounds
   if (wb?.x !== undefined && wb?.y !== undefined) {
-    windowOptions.x = wb.x;
-    windowOptions.y = wb.y;
+    windowOptions.x = wb.x + cascade;
+    windowOptions.y = wb.y + cascade;
   }
 
-  mainWindow = new BrowserWindow(windowOptions);
+  const win = new BrowserWindow(windowOptions);
+  windows.add(win.id, win, workspaceId);
 
   if (wb?.isMaximized) {
-    mainWindow.maximize();
+    win.maximize();
   }
 
-  // Save window bounds on close and truncate history
-  mainWindow.on('close', async () => {
+  win.on('focus', () => windows.markFocused(win.id));
+
+  // Save window bounds on close. Only the window the user last focused records them,
+  // so closing a secondary window does not overwrite the remembered main-window position.
+  win.on('close', async () => {
+    const focusedId = windows.getFocusedId();
+    if (focusedId !== null && focusedId !== win.id) return;
     try {
-      const currentSettings = await getSettings();
-      const isMaximized = mainWindow.isMaximized();
+      const isMaximized = win.isMaximized();
       // Save the restored (non-maximized) bounds so un-maximizing restores correctly
-      const bounds = isMaximized ? (mainWindow.getNormalBounds?.() || mainWindow.getBounds()) : mainWindow.getBounds();
-      currentSettings.windowBounds = {
-        x: bounds.x,
-        y: bounds.y,
-        width: bounds.width,
-        height: bounds.height,
-        isMaximized
-      };
-      await saveSettings(currentSettings);
-
-      // Truncate history for all workspaces
-      const maxPerRequest = currentSettings.historyMaxPerRequest || 10;
-      try {
-        const workspacesDir = await getWorkspacesBaseDir();
-        const entries = await fs.readdir(workspacesDir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.isDirectory()) {
-            const historyPath = path.join(workspacesDir, entry.name, 'history', 'history.json');
-            try {
-              const content = await fs.readFile(historyPath, 'utf-8');
-              const historyEntries: any[] = JSON.parse(content);
-
-              const grouped: Record<string, any[]> = {};
-              for (const h of historyEntries) {
-                if (!grouped[h.requestId]) grouped[h.requestId] = [];
-                grouped[h.requestId].push(h);
-              }
-
-              const truncated: any[] = [];
-              for (const group of Object.values(grouped)) {
-                group.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-                truncated.push(...group.slice(0, maxPerRequest));
-              }
-
-              truncated.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-              await fs.writeFile(historyPath, JSON.stringify(truncated, null, 2));
-            } catch {
-              // No history file for this workspace, skip
-            }
-          }
-        }
-      } catch (error) {
-        console.error('[Electron] Failed to truncate history:', error);
-      }
+      const bounds = isMaximized ? (win.getNormalBounds?.() || win.getBounds()) : win.getBounds();
+      await mutateSettings(currentSettings => {
+        currentSettings.windowBounds = {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          isMaximized
+        };
+      });
     } catch (error) {
       console.error('[Electron] Failed to save window bounds:', error);
     }
   });
 
+  win.on('closed', () => {
+    windows.remove(win.id);
+  });
+
   const isDev = process.env.NODE_ENV === 'development';
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
-    mainWindow.webContents.openDevTools();
+    win.loadURL('http://localhost:3000');
+    win.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
+    win.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 };
 
-app.whenReady().then(createWindow);
+// Truncates history for every workspace. Runs once, on quit, rather than per window.
+async function truncateAllHistory(): Promise<void> {
+  const settings = await getSettings();
+  const maxPerRequest = settings.historyMaxPerRequest || 10;
+  try {
+    const workspacesDir = await getWorkspacesBaseDir();
+    const entries = await fs.readdir(workspacesDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const historyPath = path.join(workspacesDir, entry.name, 'history', 'history.json');
+        try {
+          const content = await fs.readFile(historyPath, 'utf-8');
+          const historyEntries: any[] = JSON.parse(content);
+
+          const grouped: Record<string, any[]> = {};
+          for (const h of historyEntries) {
+            if (!grouped[h.requestId]) grouped[h.requestId] = [];
+            grouped[h.requestId].push(h);
+          }
+
+          const truncated: any[] = [];
+          for (const group of Object.values(grouped)) {
+            group.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            truncated.push(...group.slice(0, maxPerRequest));
+          }
+
+          truncated.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          await fs.writeFile(historyPath, JSON.stringify(truncated, null, 2));
+        } catch {
+          // No history file for this workspace, skip
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[Electron] Failed to truncate history:', error);
+  }
+}
+
+app.whenReady().then(() => createWindow());
+
+let historyTruncated = false;
+app.on('before-quit', (event) => {
+  if (historyTruncated) return;
+  event.preventDefault();
+  truncateAllHistory().finally(() => {
+    historyTruncated = true;
+    app.quit();
+  });
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  if (windows.size === 0) createWindow();
 });
 
 // Workspace management
@@ -267,8 +319,7 @@ ipcMain.handle('get-settings', async () => {
 ipcMain.handle('update-settings', async (event, newSettings) => {
   try {
     // Merge so a settings save does not drop local keys such as workspaceTabs.
-    const settings = await getSettings();
-    await saveSettings({ ...settings, ...newSettings });
+    await mutateSettings(settings => Object.assign(settings, newSettings));
     return { success: true };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -277,18 +328,16 @@ ipcMain.handle('update-settings', async (event, newSettings) => {
 
 ipcMain.handle('save-preference', async (event, key: string, value: any) => {
   try {
-    const settings = await getSettings();
-    settings[key] = value;
-    await saveSettings(settings);
+    await mutateSettings(settings => { settings[key] = value; });
     return { success: true };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 });
 
-ipcMain.handle('choose-workspace-directory', async () => {
+ipcMain.handle('choose-workspace-directory', async (event) => {
   try {
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const result = await showOpenDialogFor(event, {
       properties: ['openDirectory', 'createDirectory'],
       title: 'Select Workspaces Folder',
       buttonLabel: 'Select Folder'
@@ -344,9 +393,60 @@ ipcMain.handle('load-workspaces', async () => {
   }
 });
 
-ipcMain.handle('set-active-workspace', async (event, workspaceId) => {
+// Tells a freshly loaded renderer which workspace its window shows, and which are open elsewhere.
+ipcMain.handle('get-window-context', (event) => {
+  const windowId = windowIdFor(event);
+  return {
+    success: true,
+    windowId: windowId ?? null,
+    workspaceId: windowId !== undefined ? windows.getWorkspaceId(windowId) : null,
+    openWorkspaceIds: windows.openWorkspaceIds(windowId)
+  };
+});
+
+ipcMain.handle('open-new-window', async (event, workspaceId?: string | null) => {
   try {
-    // Store active workspace preference (could save to user config file)
+    if (workspaceId) {
+      const existingWindowId = windows.findWindowIdForWorkspace(workspaceId);
+      if (existingWindowId !== undefined) {
+        windows.get(existingWindowId)?.focus();
+        return { success: true, focused: true };
+      }
+    }
+    await createWindow(workspaceId ?? null);
+    return { success: true, focused: false };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+// Saves one workspace's open tabs without touching other workspaces' entries.
+ipcMain.handle('save-workspace-tabs', async (event, workspaceId: string, snapshot: any) => {
+  try {
+    await mutateSettings(settings => {
+      settings.workspaceTabs = { ...(settings.workspaceTabs ?? {}), [workspaceId]: snapshot };
+    });
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('set-active-workspace', async (event, workspaceId: string) => {
+  try {
+    const windowId = windowIdFor(event);
+    if (windowId === undefined) return { success: false, error: 'Unknown window' };
+
+    // A workspace is shown in one window at a time; focus the window that already has it.
+    const otherWindowId = windows.findWindowIdForWorkspace(workspaceId, windowId);
+    if (otherWindowId !== undefined) {
+      windows.get(otherWindowId)?.focus();
+      return { success: false, alreadyOpen: true, error: 'Workspace is already open in another window' };
+    }
+
+    windows.setWorkspaceId(windowId, workspaceId);
+    // Last-used workspace, restored by the next window that opens without one.
+    await mutateSettings(settings => { settings.activeWorkspaceId = workspaceId; });
     return { success: true };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -387,6 +487,8 @@ ipcMain.handle('update-workspace', async (event, workspaceId, name, description)
 
       // Rename the workspace folder
       await fs.rename(oldWorkspacePath, newWorkspacePath);
+      const owningWindowId = windows.findWindowIdForWorkspace(workspaceId);
+      if (owningWindowId !== undefined) windows.setWorkspaceId(owningWindowId, finalWorkspaceId);
       workspaceId = finalWorkspaceId;
 
       console.log('[Electron] Renamed workspace folder:', oldWorkspacePath, '->', newWorkspacePath);
@@ -419,6 +521,9 @@ ipcMain.handle('delete-workspace', async (event, workspaceId) => {
 
     // Delete the entire workspace folder
     await fs.rm(workspacePath, { recursive: true, force: true });
+
+    const owningWindowId = windows.findWindowIdForWorkspace(workspaceId);
+    if (owningWindowId !== undefined) windows.setWorkspaceId(owningWindowId, null);
 
     console.log('[Electron] Deleted workspace:', workspaceId);
     return { success: true };
@@ -1020,9 +1125,9 @@ ipcMain.handle('delete-certificate', async (event, id) => {
   }
 });
 
-ipcMain.handle('load-certificate-file', async () => {
+ipcMain.handle('load-certificate-file', async (event) => {
   try {
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const result = await showOpenDialogFor(event, {
       properties: ['openFile'],
       filters: [
         { name: 'Certificate Files', extensions: ['pem', 'crt', 'cer', 'p7b', 'p7c'] },
@@ -1041,9 +1146,9 @@ ipcMain.handle('load-certificate-file', async () => {
   }
 });
 
-ipcMain.handle('select-binary-file', async () => {
+ipcMain.handle('select-binary-file', async (event) => {
   try {
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const result = await showOpenDialogFor(event, {
       properties: ['openFile'],
       filters: [
         { name: 'All Files', extensions: ['*'] }
@@ -1065,9 +1170,9 @@ ipcMain.handle('select-binary-file', async () => {
   }
 });
 
-ipcMain.handle('select-json-file', async () => {
+ipcMain.handle('select-json-file', async (event) => {
   try {
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const result = await showOpenDialogFor(event, {
       properties: ['openFile'],
       filters: [
         { name: 'JSON Files', extensions: ['json'] },
@@ -1086,9 +1191,9 @@ ipcMain.handle('select-json-file', async () => {
   }
 });
 
-ipcMain.handle('select-data-file', async () => {
+ipcMain.handle('select-data-file', async (event) => {
   try {
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const result = await showOpenDialogFor(event, {
       properties: ['openFile'],
       filters: [
         { name: 'Data Files', extensions: ['csv', 'json'] },
