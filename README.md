@@ -541,13 +541,13 @@ This is read-and-run only by design, matching the tools above — there's no cre
 The **⬆️ Import** button in the top menu bar opens the import dialog, which has four tabs:
 
 #### Postman Collection
-Import a Postman v2.0 or v2.1 collection JSON file. All requests, headers, body content, authentication, and pre/post scripts are preserved. A top-level `variable[]` array is imported into the collection's own **Edit Variables** editor (for `pm.collectionVariables`) and into a synthetic `"<name> Variables"` Environment (for `{{variable}}` substitution in URLs/headers/bodies).
+Import a Postman v2.0 or v2.1 collection JSON file. All requests, headers, body content, authentication, and pre/post scripts are preserved. A top-level `variable[]` array is imported into the collection's own **Edit Variables** editor (for `pm.collectionVariables`) and into a synthetic `"<name> Variables"` Environment (for `{{variable}}` substitution in URLs/headers/bodies). By default the collection is created as new; choose an existing collection (and optionally a folder or sub-folder inside it) to merge the imported folders and requests into it instead. Merged items get fresh ids, and the imported collection-level auth is not merged, so requests set to *Inherit from Collection* use the target collection's auth.
 
 #### Postman Environment
 Import a Postman environment JSON file. Variables and secret flags are preserved.
 
 #### Curl Command
-Paste a cURL command (e.g. copied from browser DevTools → "Copy as cURL") to create a new request. You can name the request and choose which collection to add it to, or create a new one.
+Paste a cURL command (e.g. copied from browser DevTools → "Copy as cURL") to create a new request. You can name the request, choose which collection to add it to, and pick a folder or sub-folder inside that collection (or leave it at the collection root), or create a new collection.
 
 #### OpenAPI / Swagger
 Paste an OpenAPI 3.x or Swagger 2.0 spec (JSON or YAML). PostRebel will:

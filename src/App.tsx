@@ -20,7 +20,7 @@ import { DEFAULT_SHORTCUTS, KeyboardShortcut, matchesShortcut } from './utils/ke
 import { HttpService } from './utils/httpService';
 import { ScriptRunner } from './utils/scriptRunner';
 import { appendLogEntry } from './utils/consoleLog';
-import { collectionContainsRequest, findRequestById, flattenRequests, removeRequestById, updateRequestById } from './utils/collectionTree';
+import { appendToFolder, withFreshIds, collectionContainsRequest, findRequestById, flattenRequests, removeRequestById, updateRequestById } from './utils/collectionTree';
 import { MainTab, WorkspaceTabSnapshot, closeTab, moveTab, openOrFocusTab, removeMatchingTabs, sanitizeWorkspaceTabs, tabKey, tabsStillPresent } from './utils/mainTabs';
 import { RequestWindowTabs, WindowTabItem } from './components/RequestWindowTabs';
 import { computeOpenApiDrift, applyOpenApiDrift } from './utils/openApiDrift';
@@ -594,7 +594,24 @@ function App() {
     setShowImportModal(true);
   };
 
-  const handleImportCollection = async (collection: Collection, collectionVariables?: Environment) => {
+  const handleImportCollection = async (
+    collection: Collection,
+    collectionVariables?: Environment,
+    targetCollectionId?: string | null,
+    folderId?: string | null
+  ) => {
+    const target = targetCollectionId ? collections.find(c => c.id === targetCollectionId) : undefined;
+    if (target) {
+      // Merge the imported folders and requests into the chosen folder, with fresh ids.
+      // The imported collection's own collection-level auth and variables are not merged.
+      const content = withFreshIds({ requests: collection.requests, folders: collection.folders || [] });
+      await saveCollection(appendToFolder(target, folderId ?? null, content));
+      if (collectionVariables) {
+        await saveEnvironment(collectionVariables);
+      }
+      console.log('[App] Merged collection into', target.name, `(${collection.requests.length} requests)`);
+      return;
+    }
     await saveCollection(collection);
     // Auto-expand the imported collection in sidebar
     if (collectionVariables) {
@@ -632,17 +649,14 @@ function App() {
   const handleImportCurl = async (
     request: ApiRequest,
     collectionId: string | null,
-    newCollectionName?: string
+    newCollectionName?: string,
+    folderId?: string | null
   ) => {
     if (collectionId) {
-      // Add to existing collection
+      // Add to existing collection, in the chosen folder (or its root)
       const collection = collections.find(c => c.id === collectionId);
       if (collection) {
-        const updated = {
-          ...collection,
-          requests: [...collection.requests, request],
-        };
-        await saveCollection(updated);
+        await saveCollection(appendToFolder(collection, folderId ?? null, { requests: [request] }));
       }
     } else {
       // Create new collection

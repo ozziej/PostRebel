@@ -3,7 +3,7 @@ import { Collection, Environment, ApiRequest } from '../types';
 import { importPostmanCollection, importPostmanEnvironment } from '../utils/postmanImporter';
 import { parseCurl } from '../utils/curlParser';
 import { importOpenApi } from '../utils/openApiImporter';
-import { countRequests } from '../utils/collectionTree';
+import { countRequests, listFolderOptions } from '../utils/collectionTree';
 import { computeOpenApiDrift } from '../utils/openApiDrift';
 
 export type ImportTab = 'collection' | 'environment' | 'curl' | 'openapi';
@@ -13,9 +13,9 @@ interface ImportModalProps {
   initialTab?: ImportTab;
   collections: Collection[];
   onClose: () => void;
-  onImportCollection: (collection: Collection, collectionVariables?: Environment) => void;
+  onImportCollection: (collection: Collection, collectionVariables?: Environment, targetCollectionId?: string | null, folderId?: string | null) => void;
   onImportEnvironment: (environment: Environment) => void;
-  onImportCurl: (request: ApiRequest, collectionId: string | null, newCollectionName?: string) => void;
+  onImportCurl: (request: ApiRequest, collectionId: string | null, newCollectionName?: string, folderId?: string | null) => void;
   onImportOpenApi: (collection: Collection, targetCollectionId: string | null, newCollectionName?: string, removeKeys?: string[]) => void;
 }
 
@@ -38,6 +38,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [parseError, setParseError] = useState('');
   const [curlRequestName, setCurlRequestName] = useState('');
   const [curlTargetCollection, setCurlTargetCollection] = useState('__new__');
+  // '' means the collection root; otherwise the id of a folder or sub-folder inside the target collection.
+  const [curlTargetFolder, setCurlTargetFolder] = useState('');
+  // Same target choice for a Postman collection import; '__new__' keeps the original behaviour.
+  const [postmanTargetCollection, setPostmanTargetCollection] = useState('__new__');
+  const [postmanTargetFolder, setPostmanTargetFolder] = useState('');
   const [curlNewCollectionName, setCurlNewCollectionName] = useState('');
   const [openApiTargetCollection, setOpenApiTargetCollection] = useState('__new__');
   const [openApiNewCollectionName, setOpenApiNewCollectionName] = useState('');
@@ -70,6 +75,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setParseError('');
     setCurlRequestName('');
     setCurlTargetCollection('__new__');
+    setCurlTargetFolder('');
+    setPostmanTargetCollection('__new__');
+    setPostmanTargetFolder('');
     setCurlNewCollectionName('');
     setOpenApiTargetCollection('__new__');
     setOpenApiNewCollectionName('');
@@ -172,7 +180,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     if (!preview) return;
 
     if (activeTab === 'collection') {
-      onImportCollection(preview.collection, preview.collectionVariables);
+      const targetId = postmanTargetCollection === '__new__' ? null : postmanTargetCollection;
+      onImportCollection(preview.collection, preview.collectionVariables, targetId, targetId ? (postmanTargetFolder || null) : null);
       onClose();
     } else if (activeTab === 'environment') {
       onImportEnvironment(preview.environment);
@@ -180,7 +189,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     } else if (activeTab === 'curl') {
       const request = { ...preview.request, name: curlRequestName || preview.request.name };
       const targetId = curlTargetCollection === '__new__' ? null : curlTargetCollection;
-      onImportCurl(request, targetId, curlNewCollectionName);
+      onImportCurl(request, targetId, curlNewCollectionName, targetId ? (curlTargetFolder || null) : null);
       onClose();
     } else if (activeTab === 'openapi') {
       const importedCollection = { ...preview.collection, id: Date.now().toString() };
@@ -209,6 +218,62 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   });
 
   const totalRequestCount = preview?.collection ? countRequests(preview.collection) : 0;
+
+  // Collection and folder pickers. `targetCollectionId` is an existing collection, not '__new__'.
+  const renderFolderPicker = (targetCollectionId: string, folderValue: string, onFolderChange: (value: string) => void) => {
+    const targetCollection = collections.find(c => c.id === targetCollectionId);
+    const folderOptions = targetCollection ? listFolderOptions(targetCollection) : [];
+    if (folderOptions.length === 0) return null;
+    return (
+      <div style={{ marginTop: '0.75rem' }}>
+        <label style={{ display: 'block', fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
+          Folder
+        </label>
+        <select
+          className="form-input"
+          value={folderValue}
+          onChange={(e) => onFolderChange(e.target.value)}
+          style={{ width: '100%', fontSize: '0.85rem' }}
+        >
+          <option value="">Collection root</option>
+          {folderOptions.map(option => (
+            <option key={option.id} value={option.id}>{option.label}</option>
+          ))}
+        </select>
+      </div>
+    );
+  };
+
+  const renderCollectionPicker = (
+    value: string,
+    onCollectionChange: (value: string) => void,
+    onFolderChange: (value: string) => void,
+    folderValue: string,
+    label: string,
+  ) => (
+    <>
+      <div style={{ marginTop: '0.75rem' }}>
+        <label style={{ display: 'block', fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
+          {label}
+        </label>
+        <select
+          className="form-input"
+          value={value}
+          onChange={(e) => {
+            onCollectionChange(e.target.value);
+            onFolderChange('');
+          }}
+          style={{ width: '100%', fontSize: '0.85rem' }}
+        >
+          {collections.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+          <option value="__new__">+ New collection</option>
+        </select>
+      </div>
+      {value !== '__new__' && renderFolderPicker(value, folderValue, onFolderChange)}
+    </>
+  );
 
   return (
     <div style={{
@@ -343,6 +408,13 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                       </div>
                     ))}
                   </div>
+                )}
+                {collections.length > 0 && renderCollectionPicker(
+                  postmanTargetCollection,
+                  setPostmanTargetCollection,
+                  setPostmanTargetFolder,
+                  postmanTargetFolder,
+                  'Add to collection',
                 )}
               </div>
             )}
@@ -482,23 +554,14 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   />
                 </div>
 
-                {/* Target collection */}
-                <div style={{ marginTop: '0.75rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
-                    Add to collection
-                  </label>
-                  <select
-                    className="form-input"
-                    value={curlTargetCollection}
-                    onChange={(e) => setCurlTargetCollection(e.target.value)}
-                    style={{ width: '100%', fontSize: '0.85rem' }}
-                  >
-                    {collections.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                    <option value="__new__">+ New collection</option>
-                  </select>
-                </div>
+                {/* Target collection and folder */}
+                {renderCollectionPicker(
+                  curlTargetCollection,
+                  setCurlTargetCollection,
+                  setCurlTargetFolder,
+                  curlTargetFolder,
+                  'Add to collection',
+                )}
 
                 {/* New collection name */}
                 {curlTargetCollection === '__new__' && (

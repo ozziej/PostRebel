@@ -12,6 +12,9 @@ import {
   removeFolderById,
   addFolder,
   collectionContainsRequest,
+  listFolderOptions,
+  appendToFolder,
+  withFreshIds,
 } from '../../utils/collectionTree';
 import { ApiRequest, Collection, CollectionFolder } from '../../types';
 
@@ -30,6 +33,57 @@ function makeNestedCollection(): Collection {
   const folderA: CollectionFolder = { id: 'A', name: 'A', requests: [req('r2')], folders: [folderB] };
   return { id: 'c1', name: 'Coll', requests: [req('r1')], folders: [folderA] };
 }
+
+describe('listFolderOptions, appendToFolder and withFreshIds', () => {
+  const nested = {
+    requests: [],
+    folders: [
+      {
+        id: 'users', name: 'Users', requests: [],
+        folders: [{ id: 'admin', name: 'Admin', requests: [] }],
+      },
+      { id: 'billing', name: 'Billing', requests: [] },
+    ],
+  };
+  const request = req('r1');
+
+  it('lists every folder depth-first with its full path', () => {
+    expect(listFolderOptions(nested)).toEqual([
+      { id: 'users', label: 'Users' },
+      { id: 'admin', label: 'Users / Admin' },
+      { id: 'billing', label: 'Billing' },
+    ]);
+  });
+
+  it('appends to the root when no folder is given', () => {
+    const updated = appendToFolder(nested, null, { requests: [request] });
+    expect(updated.requests).toEqual([request]);
+    expect(updated.folders).toEqual(nested.folders);
+  });
+
+  it('appends to a nested sub-folder without touching its siblings', () => {
+    const updated = appendToFolder(nested, 'admin', { requests: [request] });
+    expect(updated.folders[0].folders![0].requests).toEqual([request]);
+    expect(updated.folders[1]).toEqual(nested.folders[1]);
+    expect(updated.requests).toEqual([]);
+  });
+
+  it('appends imported folders as sub-folders of the target folder', () => {
+    const imported = { requests: [], folders: [{ id: 'x', name: 'Imported', requests: [request] }] };
+    const updated = appendToFolder(nested, 'billing', imported);
+    expect(updated.folders[1].folders).toEqual(imported.folders);
+  });
+
+  it('gives every request and folder a new id at any depth', () => {
+    const copy = withFreshIds(nested);
+    expect(copy.folders[0].id).not.toBe('users');
+    expect(copy.folders[0].folders![0].id).not.toBe('admin');
+    expect(copy.folders[1].id).not.toBe('billing');
+    const withRequest = withFreshIds({ requests: [request], folders: [] });
+    expect(withRequest.requests[0].id).not.toBe('r1');
+    expect(withRequest.requests[0].name).toBe('r1');
+  });
+});
 
 describe('flattenRequests', () => {
   it('collects requests at every depth, depth-first', () => {

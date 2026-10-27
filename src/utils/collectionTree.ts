@@ -101,6 +101,53 @@ export function updateFolderById<T extends FolderContainer>(
   };
 }
 
+export interface FolderOption {
+  id: string;
+  /** Path from the top-level folder down, e.g. "Users / Admin". */
+  label: string;
+}
+
+/** Every folder in a container, depth-first, labelled with its full path. */
+export function listFolderOptions(container: FolderContainer, parentPath: string[] = []): FolderOption[] {
+  const options: FolderOption[] = [];
+  for (const folder of container.folders || []) {
+    const path = [...parentPath, folder.name];
+    options.push({ id: folder.id, label: path.join(' / ') });
+    options.push(...listFolderOptions(folder, path));
+  }
+  return options;
+}
+
+/** Returns a new copy of `container` with `content`'s requests and folders appended to the folder `folderId`, or to the root when null. */
+export function appendToFolder<T extends FolderContainer>(
+  container: T,
+  folderId: string | null,
+  content: { requests?: ApiRequest[]; folders?: CollectionFolder[] },
+): T {
+  const requests = content.requests || [];
+  const folders = content.folders || [];
+  if (folderId === null) {
+    return { ...container, requests: [...container.requests, ...requests], folders: [...(container.folders || []), ...folders] };
+  }
+  return updateFolderById(container, folderId, folder => ({
+    ...folder,
+    requests: [...folder.requests, ...requests],
+    folders: [...(folder.folders || []), ...folders],
+  }));
+}
+
+let freshIdCounter = 0;
+
+/** Copies requests and folders with new ids at every depth, so merging an import cannot clash with existing ids. */
+export function withFreshIds<T extends FolderContainer>(content: T): T {
+  const freshId = () => `${Date.now().toString(36)}-${(freshIdCounter++).toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  return {
+    ...content,
+    requests: content.requests.map(request => ({ ...request, id: freshId() })),
+    folders: (content.folders || []).map(folder => withFreshIds({ ...folder, id: freshId() })),
+  };
+}
+
 /** Returns a new copy of `container` with the folder matching `folderId` removed, at any depth. */
 export function removeFolderById<T extends FolderContainer>(container: T, folderId: string): T {
   return {
