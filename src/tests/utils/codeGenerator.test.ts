@@ -83,3 +83,90 @@ describe('generatePython - oauth2 auth', () => {
     expect(python).toContain("'Authorization': f'Bearer {access_token}'");
   });
 });
+
+function makeBodyRequest(body: ApiRequest['body'], headers: Record<string, string> = {}, method: ApiRequest['method'] = 'POST'): ApiRequest {
+  return {
+    id: 'r1',
+    name: 'Body',
+    method,
+    url: 'https://api.example.com/items',
+    headers,
+    body,
+  };
+}
+
+describe('generateCurl - body Content-Type header', () => {
+  it('adds Content-Type: application/json for a raw JSON body', () => {
+    const curl = generateCurl(makeBodyRequest({ type: 'raw', rawSubtype: 'json', data: '{"a":1}' }), null, null);
+    expect(curl).toContain("-H 'Content-Type: application/json'");
+  });
+
+  it('uses the matching Content-Type for other raw subtypes', () => {
+    const xml = generateCurl(makeBodyRequest({ type: 'raw', rawSubtype: 'xml', data: '<a/>' }), null, null);
+    const html = generateCurl(makeBodyRequest({ type: 'raw', rawSubtype: 'html', data: '<p/>' }), null, null);
+    const text = generateCurl(makeBodyRequest({ type: 'raw', rawSubtype: 'text', data: 'hi' }), null, null);
+    expect(xml).toContain("-H 'Content-Type: application/xml'");
+    expect(html).toContain("-H 'Content-Type: text/html'");
+    expect(text).toContain("-H 'Content-Type: text/plain'");
+  });
+
+  it('adds application/x-www-form-urlencoded for x-www-form-urlencoded bodies', () => {
+    const curl = generateCurl(
+      makeBodyRequest({ type: 'x-www-form-urlencoded', data: '', formData: [{ key: 'a', value: '1', enabled: true }] }),
+      null,
+      null
+    );
+    expect(curl).toContain("-H 'Content-Type: application/x-www-form-urlencoded'");
+  });
+
+  it('adds no body Content-Type for form-data, so curl can generate the multipart boundary', () => {
+    const curl = generateCurl(
+      makeBodyRequest({ type: 'form-data', data: '', formData: [{ key: 'a', value: '1', enabled: true }] }),
+      null,
+      null
+    );
+    expect(curl).not.toContain('Content-Type');
+    expect(curl).toContain("-F 'a=1'");
+  });
+
+  it('removes a user-set Content-Type on form-data bodies, since it would break the multipart boundary', () => {
+    const curl = generateCurl(
+      makeBodyRequest(
+        { type: 'form-data', data: '', formData: [{ key: 'a', value: '1', enabled: true }] },
+        { 'content-type': 'multipart/form-data' }
+      ),
+      null,
+      null
+    );
+    expect(curl).not.toContain('multipart/form-data');
+  });
+
+  it('keeps a user-set Content-Type over the one implied by the body', () => {
+    const curl = generateCurl(
+      makeBodyRequest({ type: 'raw', rawSubtype: 'json', data: '{}' }, { 'Content-Type': 'application/vnd.api+json' }),
+      null,
+      null
+    );
+    expect(curl).toContain("-H 'Content-Type: application/vnd.api+json'");
+    expect(curl).not.toContain("-H 'Content-Type: application/json'");
+  });
+
+  it('adds no body Content-Type for GET requests or bodies of type none', () => {
+    const get = generateCurl(makeBodyRequest({ type: 'raw', rawSubtype: 'json', data: '{}' }, {}, 'GET'), null, null);
+    const none = generateCurl(makeBodyRequest({ type: 'none', data: '' }), null, null);
+    expect(get).not.toContain('Content-Type');
+    expect(none).not.toContain('Content-Type');
+  });
+});
+
+describe('generateFetch and generatePython - body Content-Type header', () => {
+  it('includes the body Content-Type in fetch headers', () => {
+    const fetch = generateFetch(makeBodyRequest({ type: 'raw', rawSubtype: 'json', data: '{}' }), null, null);
+    expect(fetch).toContain("'Content-Type': 'application/json',");
+  });
+
+  it('sends a JSON raw body as json= in Python, since Content-Type is now known', () => {
+    const python = generatePython(makeBodyRequest({ type: 'raw', rawSubtype: 'json', data: '{"a":1}' }), null, null);
+    expect(python).toContain('json={"a":1}');
+  });
+});

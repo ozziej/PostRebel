@@ -91,8 +91,39 @@ function getEffectiveOAuth2Request(
   return { tokenRequest: buildOAuth2TokenRequest(resolved), headerPrefix: resolved.headerPrefix?.trim() || 'Bearer' };
 }
 
+// Mirrors httpService.ts: only POST/PUT/PATCH requests send a body.
+function hasRequestBody(request: ApiRequest): boolean {
+  return !!request.body && request.body.type !== 'none' && ['POST', 'PUT', 'PATCH'].includes(request.method);
+}
+
+// Content-Type implied by the body, matching what httpService.ts sends.
+// Returns null when the body doesn't imply one.
+function getBodyContentType(request: ApiRequest): string | null {
+  if (!request.body || !hasRequestBody(request)) return null;
+
+  switch (request.body.type) {
+    case 'raw': {
+      const rawContentTypes: Record<string, string> = {
+        text: 'text/plain',
+        javascript: 'application/javascript',
+        json: 'application/json',
+        html: 'text/html',
+        xml: 'application/xml',
+      };
+      return rawContentTypes[request.body.rawSubtype || 'json'] || 'application/json';
+    }
+    case 'x-www-form-urlencoded':
+      return 'application/x-www-form-urlencoded';
+    case 'graphql':
+      return 'application/json';
+    default:
+      return null;
+  }
+}
+
 /**
  * Build complete headers object by merging request headers and auth header.
+ * Also adds the Content-Type implied by the body, so generated code sends the same headers as the app.
  */
 function buildHeaders(
   request: ApiRequest,
@@ -105,6 +136,17 @@ function buildHeaders(
   Object.entries(request.headers).forEach(([key, value]) => {
     headers[key] = substituteVars(value, env);
   });
+
+  const contentTypeKey = Object.keys(headers).find(key => key.toLowerCase() === 'content-type');
+  if (request.body?.type === 'form-data' && hasRequestBody(request)) {
+    // curl -F / multipart generates its own Content-Type with a boundary; an explicit one breaks the upload
+    if (contentTypeKey) delete headers[contentTypeKey];
+  } else {
+    const bodyContentType = getBodyContentType(request);
+    if (bodyContentType && !contentTypeKey) {
+      headers['Content-Type'] = bodyContentType;
+    }
+  }
 
   // Add auth header if present
   if (authHeader) {
